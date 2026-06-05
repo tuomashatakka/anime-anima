@@ -4,6 +4,7 @@ import { Toolbar } from './ui'
 import { loadCatalog } from './manifest'
 import type { AnimationEntry, ModelEntry } from './types'
 
+
 const loadingEl = document.getElementById('loading')!
 let pending = 0
 
@@ -17,7 +18,7 @@ async function main () {
   const viewer = new VRMViewer(canvas)
 
   const toolbar = new Toolbar({
-    onModelPick: entry => void selectModel(entry),
+    onModelPick:     entry => void selectModel(entry),
     onAnimationPick: entry => void selectAnimation(entry),
   })
 
@@ -58,12 +59,14 @@ async function main () {
 
     // Pick a sensible default model + a friendly default animation.
     const firstModel = catalog.models[0]
-    if (firstModel) await selectModel(firstModel)
+    if (firstModel)
+      await selectModel(firstModel)
 
     const defaultAnimation =
-      catalog.animations.find(a => /idle|greeting|hello|stand/i.test(a.name)) ??
+      catalog.animations.find(a => (/idle|greeting|hello|stand/i).test(a.name)) ??
       catalog.animations[0]
-    if (defaultAnimation) await selectAnimation(defaultAnimation)
+    if (defaultAnimation)
+      await selectAnimation(defaultAnimation)
   }
   catch (error) {
     console.error(error)

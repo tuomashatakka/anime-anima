@@ -41,10 +41,11 @@ node scripts/download-vrm-assets.mts --only vrm
 ## Development
 
 ```bash
-npm install
-npm run download-assets   # populate public/vrm-assets (only needed once)
-npm run dev               # vite dev server
-npm run build             # type-check + production build
+bun install
+bun run download-assets   # populate public/vrm-assets (only needed once)
+bun run dev               # vite dev server
+bun run build             # type-check + production build
+bun run lint              # eslint (@tuomashatakka/eslint-config)
 ```
 
 ## How it works

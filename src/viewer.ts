@@ -2,7 +2,8 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { BVHLoader } from 'three/examples/jsm/loaders/BVHLoader.js'
-import { VRM, VRMLoaderPlugin, VRMUtils, type VRMHumanBoneName } from '@pixiv/three-vrm'
+import { VRM, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
+import type { VRMHumanBoneName } from '@pixiv/three-vrm'
 import {
   VRMAnimation,
   VRMAnimationLoaderPlugin,
@@ -11,8 +12,9 @@ import {
 } from '@pixiv/three-vrm-animation'
 import type { AnimationEntry, ModelEntry } from './types'
 
+
 interface BVHResult {
-  clip: THREE.AnimationClip
+  clip:     THREE.AnimationClip
   skeleton: THREE.Skeleton
 }
 
@@ -27,7 +29,7 @@ interface BVHResult {
 export class VRMViewer {
   private readonly renderer: THREE.WebGLRenderer
   private readonly scene = new THREE.Scene()
-  private readonly camera: THREE.PerspectiveCamera
+  private readonly camera:   THREE.PerspectiveCamera
   private readonly controls: OrbitControls
   private readonly clock = new THREE.Clock()
 
@@ -35,9 +37,9 @@ export class VRMViewer {
   private readonly vrmaLoader = new GLTFLoader()
   private readonly bvhLoader = new BVHLoader()
 
-  private currentVRM: VRM | null = null
-  private mixer: THREE.AnimationMixer | null = null
-  private currentAction: THREE.AnimationAction | null = null
+  private currentVRM:       VRM | null = null
+  private mixer:            THREE.AnimationMixer | null = null
+  private currentAction:    THREE.AnimationAction | null = null
   private currentAnimation: AnimationEntry | null = null
 
   /** Raw, model-agnostic animation data, cached after first download. */
@@ -48,8 +50,8 @@ export class VRMViewer {
 
   // #region Click-to-move state
   private readonly canvas: HTMLCanvasElement
-  private ground!: THREE.Mesh
-  private marker!: THREE.Mesh
+  private ground!:         THREE.Mesh
+  private marker!:         THREE.Mesh
   private readonly raycaster = new THREE.Raycaster()
   private readonly pointer = new THREE.Vector2()
   private pointerDown = { x: 0, y: 0, time: 0 }
@@ -61,23 +63,23 @@ export class VRMViewer {
 
   /** A walk/jog/crawl clip used to locomote toward a tapped point. */
   private locomotionEntry: AnimationEntry | null = null
-  private locomotionClip: THREE.AnimationClip | null = null
-  private moveSpeed = 1.25            // metres / second
-  private readonly turnSpeed = 9      // radians / second
+  private locomotionClip:  THREE.AnimationClip | null = null
+  private moveSpeed = 1.25 // metres / second
+  private readonly turnSpeed = 9 // radians / second
   private readonly arriveRadius = 0.08
   // #endregion
 
   constructor (canvas: HTMLCanvasElement) {
-    this.canvas = canvas
+    this.canvas   = canvas
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.renderer.setSize(window.innerWidth, window.innerHeight)
     this.renderer.shadowMap.enabled = true
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace
+    this.renderer.shadowMap.type    = THREE.PCFSoftShadowMap
+    this.renderer.outputColorSpace  = THREE.SRGBColorSpace
 
     this.scene.background = new THREE.Color(0x0e1117)
-    this.scene.fog = new THREE.Fog(0x0e1117, 8, 22)
+    this.scene.fog        = new THREE.Fog(0x0e1117, 8, 22)
 
     this.camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 100)
     this.camera.position.set(0, 1.25, 3.4)
@@ -86,8 +88,8 @@ export class VRMViewer {
     this.controls.target.set(0, 1.0, 0)
     this.controls.enableDamping = true
     this.controls.dampingFactor = 0.08
-    this.controls.minDistance = 1.2
-    this.controls.maxDistance = 12
+    this.controls.minDistance   = 1.2
+    this.controls.maxDistance   = 12
     this.controls.maxPolarAngle = Math.PI * 0.95
 
     this.gltfLoader.register(parser => new VRMLoaderPlugin(parser))
@@ -110,13 +112,13 @@ export class VRMViewer {
     key.position.set(3, 6, 4)
     key.castShadow = true
     key.shadow.mapSize.set(2048, 2048)
-    key.shadow.camera.near = 0.5
-    key.shadow.camera.far = 25
-    key.shadow.camera.left = -5
-    key.shadow.camera.right = 5
-    key.shadow.camera.top = 5
+    key.shadow.camera.near   = 0.5
+    key.shadow.camera.far    = 25
+    key.shadow.camera.left   = -5
+    key.shadow.camera.right  = 5
+    key.shadow.camera.top    = 5
     key.shadow.camera.bottom = -5
-    key.shadow.bias = -0.0005
+    key.shadow.bias          = -0.0005
     this.scene.add(key)
 
     const rim = new THREE.DirectionalLight(0x6ea8fe, 0.8)
@@ -128,15 +130,15 @@ export class VRMViewer {
       new THREE.CircleGeometry(14, 64),
       new THREE.MeshStandardMaterial({ color: 0x1a2030, roughness: 0.95, metalness: 0.0 }),
     )
-    ground.rotation.x = -Math.PI / 2
+    ground.rotation.x    = -Math.PI / 2
     ground.receiveShadow = true
-    this.ground = ground
+    this.ground          = ground
     this.scene.add(ground)
 
-    const grid = new THREE.GridHelper(28, 56, 0x2c3550, 0x222a3d)
-    ;(grid.material as THREE.Material).transparent = true
-    ;(grid.material as THREE.Material).opacity = 0.5
-    grid.position.y = 0.001
+    const grid                                    = new THREE.GridHelper(28, 56, 0x2c3550, 0x222a3d);
+    (grid.material as THREE.Material).transparent = true;
+    (grid.material as THREE.Material).opacity     = 0.5
+    grid.position.y                               = 0.001
     this.scene.add(grid)
 
     // Destination marker shown while the model walks toward a tapped point.
@@ -146,7 +148,7 @@ export class VRMViewer {
     )
     this.marker.rotation.x = -Math.PI / 2
     this.marker.position.y = 0.02
-    this.marker.visible = false
+    this.marker.visible    = false
     this.scene.add(this.marker)
   }
 
@@ -156,7 +158,7 @@ export class VRMViewer {
 
   async loadModel (entry: ModelEntry): Promise<void> {
     const gltf = await this.gltfLoader.loadAsync(entry.url)
-    const vrm = gltf.userData.vrm as VRM
+    const vrm  = gltf.userData.vrm as VRM
 
     // Perf housekeeping recommended by three-vrm.
     try {
@@ -173,13 +175,13 @@ export class VRMViewer {
     // lets the mixer drive eye direction).
     if (vrm.lookAt) {
       const lookAtProxy = new VRMLookAtQuaternionProxy(vrm.lookAt)
-      lookAtProxy.name = 'VRMLookAtQuaternionProxy'
+      lookAtProxy.name  = 'VRMLookAtQuaternionProxy'
       vrm.scene.add(lookAtProxy)
     }
 
     vrm.scene.traverse(object => {
       if ((object as THREE.Mesh).isMesh) {
-        object.castShadow = true
+        object.castShadow    = true
         object.receiveShadow = true
       }
     })
@@ -190,7 +192,7 @@ export class VRMViewer {
     this.currentVRM = vrm
     this.scene.add(vrm.scene)
 
-    this.mixer = new THREE.AnimationMixer(vrm.scene)
+    this.mixer         = new THREE.AnimationMixer(vrm.scene)
     this.currentAction = null
 
     this.frameCamera(vrm)
@@ -205,27 +207,31 @@ export class VRMViewer {
 
   /** Tell the viewer which animations exist so it can choose a locomotion clip. */
   setAvailableAnimations (animations: AnimationEntry[]): void {
-    const find = (re: RegExp) => animations.find(a => re.test(a.name))
+    const find           = (re: RegExp) => animations.find(a => re.test(a.name))
     this.locomotionEntry =
       find(/\bwalk/i) ?? find(/\bstroll|\bmarch/i) ?? find(/\bjog/i) ??
       find(/\brun\b/i) ?? find(/crawl/i) ?? null
 
-    const name = this.locomotionEntry?.name.toLowerCase() ?? ''
-    this.moveSpeed = /crawl/.test(name) ? 0.6
-      : /run/.test(name) ? 3.2
-        : /jog/.test(name) ? 2.3
+    const name     = this.locomotionEntry?.name.toLowerCase() ?? ''
+    this.moveSpeed = (/crawl/).test(name)
+      ? 0.6
+      : (/run/).test(name)
+        ? 3.2
+        : (/jog/).test(name)
+          ? 2.3
           : 1.3
   }
 
   private async prepareLocomotion (vrm: VRM): Promise<void> {
     this.locomotionClip = null
-    if (!this.locomotionEntry) return
+    if (!this.locomotionEntry)
+      return
     try {
       const clip = this.locomotionEntry.kind === 'vrma'
         ? await this.buildVRMAClip(this.locomotionEntry, vrm)
         : await this.buildBVHClip(this.locomotionEntry, vrm)
       stripHorizontalRootMotion(clip, vrm)
-      clip.name = `__locomotion_${this.locomotionEntry.name}`
+      clip.name           = `__locomotion_${this.locomotionEntry.name}`
       this.locomotionClip = clip
     }
     catch (error) {
@@ -234,7 +240,8 @@ export class VRMViewer {
   }
 
   private disposeCurrentModel () {
-    if (!this.currentVRM) return
+    if (!this.currentVRM)
+      return
     this.mixer?.stopAllAction()
     this.scene.remove(this.currentVRM.scene)
     VRMUtils.deepDispose(this.currentVRM.scene)
@@ -242,8 +249,8 @@ export class VRMViewer {
   }
 
   private frameCamera (vrm: VRM) {
-    const box = new THREE.Box3().setFromObject(vrm.scene)
-    const size = new THREE.Vector3()
+    const box    = new THREE.Box3().setFromObject(vrm.scene)
+    const size   = new THREE.Vector3()
     const center = new THREE.Vector3()
     box.getSize(size)
     box.getCenter(center)
@@ -262,7 +269,8 @@ export class VRMViewer {
     // Picking an animation cancels any in-progress walk.
     this.cancelMovement()
     this.currentAnimation = entry
-    if (!this.currentVRM || !this.mixer) return
+    if (!this.currentVRM || !this.mixer)
+      return
 
     const clip = entry.kind === 'vrma'
       ? await this.buildVRMAClip(entry, this.currentVRM)
@@ -291,7 +299,7 @@ export class VRMViewer {
   private async buildVRMAClip (entry: AnimationEntry, vrm: VRM): Promise<THREE.AnimationClip> {
     let animation = this.vrmaCache.get(entry.url)
     if (!animation) {
-      const gltf = await this.vrmaLoader.loadAsync(entry.url)
+      const gltf       = await this.vrmaLoader.loadAsync(entry.url)
       const animations = gltf.userData.vrmAnimations as VRMAnimation[] | undefined
       if (!animations?.length)
         throw new Error(`No VRM animation found in ${entry.url}`)
@@ -321,28 +329,32 @@ export class VRMViewer {
   private readonly onPointerUp = (event: PointerEvent) => {
     // Treat as a tap only if the pointer barely moved and was quick — otherwise
     // it was an OrbitControls drag.
-    const moved = Math.hypot(event.clientX - this.pointerDown.x, event.clientY - this.pointerDown.y)
+    const moved   = Math.hypot(event.clientX - this.pointerDown.x, event.clientY - this.pointerDown.y)
     const elapsed = performance.now() - this.pointerDown.time
-    if (moved > 6 || elapsed > 600) return
+    if (moved > 6 || elapsed > 600)
+      return
     this.handleTap(event.clientX, event.clientY)
   }
 
   private handleTap (clientX: number, clientY: number) {
-    if (!this.currentVRM || !this.locomotionClip) return
+    if (!this.currentVRM || !this.locomotionClip)
+      return
 
-    const rect = this.canvas.getBoundingClientRect()
-    this.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1
+    const rect     = this.canvas.getBoundingClientRect()
+    this.pointer.x = (clientX - rect.left) / rect.width * 2 - 1
     this.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1
     this.raycaster.setFromCamera(this.pointer, this.camera)
 
     const hit = this.raycaster.intersectObject(this.ground, false)[0]
-    if (!hit) return
+    if (!hit)
+      return
 
     // Keep the destination inside the ground disc.
-    const point = hit.point.clone()
-    const radius = Math.hypot(point.x, point.z)
+    const point     = hit.point.clone()
+    const radius    = Math.hypot(point.x, point.z)
     const maxRadius = 13
-    if (radius > maxRadius) point.multiplyScalar(maxRadius / radius)
+    if (radius > maxRadius)
+      point.multiplyScalar(maxRadius / radius)
     point.y = 0
 
     this.setMoveTarget(point)
@@ -361,22 +373,26 @@ export class VRMViewer {
 
   private cancelMovement () {
     this.moveTarget = null
-    this.isMoving = false
-    if (this.marker) this.marker.visible = false
+    this.isMoving   = false
+    if (this.marker)
+      this.marker.visible = false
   }
 
   private updateMovement (delta: number) {
-    if (!this.moveTarget || !this.currentVRM) return
+    if (!this.moveTarget || !this.currentVRM)
+      return
+
     const root = this.currentVRM.scene
 
-    const dx = this.moveTarget.x - root.position.x
-    const dz = this.moveTarget.z - root.position.z
+    const dx       = this.moveTarget.x - root.position.x
+    const dz       = this.moveTarget.z - root.position.z
     const distance = Math.hypot(dx, dz)
 
     // Smoothly steer toward the destination (model faces +Z at baseYaw).
     const desiredYaw = Math.atan2(dx, dz) + this.baseYaw
     let diff = desiredYaw - root.rotation.y
     diff = Math.atan2(Math.sin(diff), Math.cos(diff))
+
     const maxTurn = this.turnSpeed * delta
     root.rotation.y += THREE.MathUtils.clamp(diff, -maxTurn, maxTurn)
 
@@ -386,8 +402,8 @@ export class VRMViewer {
     }
 
     const step = Math.min(this.moveSpeed * delta, distance)
-    root.position.x += (dx / distance) * step
-    root.position.z += (dz / distance) * step
+    root.position.x += dx / distance * step
+    root.position.z += dz / distance * step
   }
 
   private onArrive () {
@@ -427,35 +443,34 @@ export class VRMViewer {
  * it for .vrma files).
  */
 function retargetBVHToVRM (bvh: BVHResult, vrm: VRM): THREE.AnimationClip {
-  const humanoid = vrm.humanoid
-  const rootBone = bvh.skeleton.bones.find(bone => bone.name === 'hips') ?? bvh.skeleton.bones[0]
-  const restHipsY = rootBone?.position.y || 1
+  const humanoid      = vrm.humanoid
+  const rootBone      = bvh.skeleton.bones.find(bone => bone.name === 'hips') ?? bvh.skeleton.bones[0]
+  const restHipsY     = rootBone?.position.y || 1
   const humanoidHipsY = humanoid.normalizedRestPose.hips?.position?.[1] ?? restHipsY
-  const hipScale = humanoidHipsY / restHipsY
+  const hipScale      = humanoidHipsY / restHipsY
 
   const tracks: THREE.KeyframeTrack[] = []
 
   for (const track of bvh.clip.tracks) {
-    const dot = track.name.lastIndexOf('.')
+    const dot      = track.name.lastIndexOf('.')
     const boneName = track.name.slice(0, dot)
     const property = track.name.slice(dot + 1)
-    const node = humanoid.getNormalizedBoneNode(boneName as VRMHumanBoneName)
-    if (!node) continue
+    const node     = humanoid.getNormalizedBoneNode(boneName as VRMHumanBoneName)
+    if (!node)
+      continue
 
-    if (property === 'quaternion') {
+    if (property === 'quaternion')
       tracks.push(new THREE.QuaternionKeyframeTrack(
         `${node.name}.quaternion`,
         Array.from(track.times),
         Array.from(track.values),
       ))
-    }
-    else if (property === 'position' && boneName === 'hips') {
+    else if (property === 'position' && boneName === 'hips')
       tracks.push(new THREE.VectorKeyframeTrack(
         `${node.name}.position`,
         Array.from(track.times),
         Array.from(track.values, value => value * hipScale),
       ))
-    }
   }
 
   return new THREE.AnimationClip(bvh.clip.name || 'bvh', bvh.clip.duration, tracks)
@@ -468,11 +483,14 @@ function retargetBVHToVRM (bvh: BVHResult, vrm: VRM): THREE.AnimationClip {
  */
 function stripHorizontalRootMotion (clip: THREE.AnimationClip, vrm: VRM): void {
   const hipsName = vrm.humanoid.getNormalizedBoneNode('hips')?.name
-  if (!hipsName) return
+  if (!hipsName)
+    return
+
   const track = clip.tracks.find(candidate => candidate.name === `${hipsName}.position`)
-  if (!track) return
+  if (!track)
+    return
   for (let i = 0; i < track.values.length; i += 3) {
-    track.values[i] = 0      // X
-    track.values[i + 2] = 0  // Z
+    track.values[i]     = 0 // X
+    track.values[i + 2] = 0 // Z
   }
 }
