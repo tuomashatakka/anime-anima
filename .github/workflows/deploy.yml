@@ -35,6 +35,9 @@ jobs:
       - name: Configure Pages
         id: pages
         uses: actions/configure-pages@v5
+        with:
+          # Turn on GitHub Pages (Actions source) if it isn't already enabled.
+          enablement: true
 
       - name: Build
         run: npm run build
