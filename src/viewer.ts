@@ -836,12 +836,37 @@ export class VRMViewer {
  * to the target model's proportions (matching how createVRMAnimationClip does
  * it for .vrma files).
  */
+/**
+ * Pre-multiply every quaternion key in a flat [x,y,z,w,…] value array by `yaw`,
+ * rotating the track's rotations in their parent frame. Used to re-face VRM0
+ * hips so the body doesn't animate backwards.
+ */
+function rotateQuaternionTrackValues (values: number[], yaw: THREE.Quaternion): void {
+  const q = new THREE.Quaternion()
+  for (let i = 0; i < values.length; i += 4) {
+    q.set(values[i], values[i + 1], values[i + 2], values[i + 3]).premultiply(yaw)
+    values[i]     = q.x
+    values[i + 1] = q.y
+    values[i + 2] = q.z
+    values[i + 3] = q.w
+  }
+}
+
 function retargetBVHToVRM (bvh: BVHResult, vrm: VRM): THREE.AnimationClip {
   const humanoid      = vrm.humanoid
   const rootBone      = bvh.skeleton.bones.find(bone => bone.name === 'hips') ?? bvh.skeleton.bones[0]
   const restHipsY     = rootBone?.position.y || 1
   const humanoidHipsY = humanoid.normalizedRestPose.hips?.position?.[1] ?? restHipsY
   const hipScale      = humanoidHipsY / restHipsY
+
+  // VRM 0.0 rigs natively face -Z, so VRMUtils.rotateVRM0 rotates vrm.scene by π
+  // to make them face +Z like VRM 1.0. The BVH pack's hips track is authored in
+  // the canonical +Z-facing humanoid space, so composing it with that scene
+  // rotation would face the whole body backwards. Counter-rotate the hips track
+  // by π for VRM0 so the net world facing matches VRM1 (the steering logic keys
+  // off the same baseYaw = π, so this cancels out cleanly for movement too).
+  const isVRM0  = vrm.meta?.metaVersion === '0'
+  const hipsYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
 
   const tracks: THREE.KeyframeTrack[] = []
 
@@ -853,12 +878,16 @@ function retargetBVHToVRM (bvh: BVHResult, vrm: VRM): THREE.AnimationClip {
     if (!node)
       continue
 
-    if (property === 'quaternion')
+    if (property === 'quaternion') {
+      const values = Array.from(track.values)
+      if (isVRM0 && boneName === 'hips')
+        rotateQuaternionTrackValues(values, hipsYaw)
       tracks.push(new THREE.QuaternionKeyframeTrack(
         `${node.name}.quaternion`,
         Array.from(track.times),
-        Array.from(track.values),
+        values,
       ))
+    }
     else if (property === 'position' && boneName === 'hips')
       tracks.push(new THREE.VectorKeyframeTrack(
         `${node.name}.position`,
