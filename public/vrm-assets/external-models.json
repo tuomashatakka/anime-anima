@@ -1,0 +1,4 @@
+{
+  "note": "Curated externally-hosted VRM models, streamed at runtime (host must send CORS headers, e.g. raw.githubusercontent.com or arweave.net). Populate `models` with { name, url, group?, thumbnail? }.",
+  "models": []
+}

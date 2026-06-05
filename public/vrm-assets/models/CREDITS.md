@@ -8,18 +8,11 @@ from the
 and `Seed-san` is the VRM Consortium official sample (VRM 1.0) from
 [vrm-c/vrm-specification](https://github.com/vrm-c/vrm-specification).
 
-All bundled models are **VRM 1.0**. The earlier VRM 0.0 sample avatars were
-removed in favour of the Open Source Avatars catalog below.
+All bundled models are **VRM 1.0**.
 
-## Open Source Avatars (loaded dynamically)
+## External models (optional)
 
-The bulk of the model picker is the
-[Open Source Avatars](https://github.com/ToxSam/open-source-avatars) registry —
-4000+ **CC0** avatars curated by ToxSam and contributors (100Avatars, VIPE
-Heroes, Grifters, Halloween Rising, Xmas Chibis, NeonGlitch86, and more).
-
-These are **not** committed to this repo. Only a lightweight index
-(`public/vrm-assets/osa-avatars.json`, regenerated with `npm run fetch-osa`) is
-stored; each `.vrm` streams directly from its Arweave URL at runtime (Arweave
-serves `Access-Control-Allow-Origin: *`). Most are VRM 0.0, which the BVH
-retargeting handles. Per-collection licensing is documented at the source.
+`public/vrm-assets/external-models.json` can list additional VRMs hosted
+elsewhere; each entry's `.vrm` streams from its URL at runtime, so the host must
+send CORS headers (e.g. `raw.githubusercontent.com`, `arweave.net`). The file
+ships empty by default.

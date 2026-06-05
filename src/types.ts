@@ -33,13 +33,10 @@ export interface ModelEntry {
   thumbnail?: string
 }
 
-/** Shape of public/vrm-assets/osa-avatars.json produced by scripts/fetch-osa-avatars.mts */
-export interface OsaAvatarsFile {
-  source:    string
-  license:   string
-  fetchedAt: string
-  count:     number
-  avatars:   { name: string, url: string, project: string, thumbnail?: string }[]
+/** Shape of public/vrm-assets/external-models.json — curated externally-hosted VRMs. */
+export interface ExternalModelsFile {
+  note?:  string
+  models: { name: string, url: string, group?: string, thumbnail?: string }[]
 }
 
 export interface AnimationEntry {

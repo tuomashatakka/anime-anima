@@ -1,10 +1,10 @@
-import type { AnimationEntry, AnimationKind, AnimationMeta, AssetManifest, ClassificationFile, ModelEntry, OsaAvatarsFile } from './types'
+import type { AnimationEntry, AnimationKind, AnimationMeta, AssetManifest, ClassificationFile, ExternalModelsFile, ModelEntry } from './types'
 
 
 const BASE               = import.meta.env.BASE_URL
 const MANIFEST_URL       = `${BASE}vrm-assets/manifest.json`
 const CLASSIFICATION_URL = `${BASE}vrm-assets/classification.json`
-const OSA_URL            = `${BASE}vrm-assets/osa-avatars.json`
+const EXTERNAL_URL       = `${BASE}vrm-assets/external-models.json`
 
 // Manifest paths are absolute ("/vrm-assets/…"); prefix them with the app base
 //  so they resolve correctly when hosted under a sub-path (e.g. GitHub Pages).
@@ -58,23 +58,22 @@ async function loadClassification (): Promise<Map<string, AnimationMeta>> {
 }
 
 /**
- * Open Source Avatars (https://github.com/ToxSam/open-source-avatars): a large
- * CC0 registry hosted on Arweave (CORS-enabled), loaded straight from the
- * committed index and streamed per-VRM at runtime. Best-effort: a missing file
- * just means no external avatars.
+ * Curated external VRM models (public/vrm-assets/external-models.json), streamed
+ * from their host URL at runtime — the host must send CORS headers. Best-effort:
+ * a missing file just means no external models.
  */
-async function loadOsaModels (): Promise<ModelEntry[]> {
+async function loadExternalModels (): Promise<ModelEntry[]> {
   try {
-    const response = await fetch(OSA_URL)
+    const response = await fetch(EXTERNAL_URL)
     if (!response.ok)
       return []
 
-    const file = await response.json() as OsaAvatarsFile
-    return file.avatars.map(avatar => ({
-      name:      avatar.name,
-      url:       avatar.url,
-      group:     avatar.project,
-      thumbnail: avatar.thumbnail,
+    const file = await response.json() as ExternalModelsFile
+    return file.models.map(model => ({
+      name:      model.name,
+      url:       model.url,
+      group:     model.group,
+      thumbnail: model.thumbnail,
     }))
   }
   catch {
@@ -90,11 +89,11 @@ export async function loadCatalog (): Promise<AssetCatalog> {
   const manifest  = await response.json() as AssetManifest
   const metaByUrl = await loadClassification()
 
-  // Bundled VRM1 models first (instant load), then the external OSA catalog.
+  // Bundled VRM1 models first (instant load), then any curated external models.
   const local: ModelEntry[] = (manifest.models ?? [])
     .map(url => ({ name: prettify(url), url: withBase(url), group: 'Bundled' }))
     .sort((a, b) => a.name.localeCompare(b.name))
-  const models: ModelEntry[] = [ ...local, ...await loadOsaModels() ]
+  const models: ModelEntry[] = [ ...local, ...await loadExternalModels() ]
 
   // The download script routes every file in `animation_nitral-fork` into the
   // `vrma` bucket regardless of its real extension, so classify by extension
