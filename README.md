@@ -9,7 +9,11 @@ playing animation, and animation changes are crossfade-tweened.
 ## Features
 
 - **VRM loading** via [`@pixiv/three-vrm`](https://github.com/pixiv/three-vrm)
-  (`GLTFLoader` + `VRMLoaderPlugin`).
+  (`GLTFLoader` + `VRMLoaderPlugin`). Ships a dozen models — the original
+  SillyTavern pack plus VRM Consortium / VRoid sample avatars (see
+  `public/vrm-assets/models/CREDITS.md`).
+- **Dramatic stage lighting** (warm key + cool rim + magenta kicker, ACES tone
+  mapping) over a **reflective floor** (`Reflector` planar reflections).
 - **Two animation formats**, both compiled to clips that drive the VRM's
   *normalized* humanoid bones so a single `AnimationMixer` handles them:
   - `.vrma` — via `@pixiv/three-vrm-animation` (`createVRMAnimationClip`).

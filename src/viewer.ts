@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { BVHLoader } from 'three/examples/jsm/loaders/BVHLoader.js'
+import { Reflector } from 'three/examples/jsm/objects/Reflector.js'
 import { VRM, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
 import type { VRMHumanBoneName } from '@pixiv/three-vrm'
 import {
@@ -25,8 +26,16 @@ interface PlayOptions {
   transition?: boolean
 }
 
-/** Ground travel speed (metres / second) for each gait. */
-const LOCOMOTION_SPEED: Record<Locomotion, number> = { walk: 1.3, jog: 2.4, run: 3.4, crawl: 0.6 }
+/**
+ * Ground travel speed (metres / second) for each gait, for a model with ~0.9 m
+ * hips. These match the average backward speed of the planted foot in the
+ * (in-place) source clips, so the feet do not slide; they are scaled per-model
+ * by hip height at load time.
+ */
+const LOCOMOTION_SPEED: Record<Locomotion, number> = { walk: 0.82, jog: 1.12, run: 2.3, crawl: 0.44 }
+
+/** Hip height (metres) the LOCOMOTION_SPEED values were measured against. */
+const REFERENCE_HIP_HEIGHT = 0.9
 
 /** Order gaits escalate through on repeated taps while standing. */
 const GAIT_ESCALATION: Record<Locomotion, Locomotion> = { walk: 'jog', jog: 'run', run: 'run', crawl: 'crawl' }
@@ -93,9 +102,12 @@ export class VRMViewer {
   private isMoving = false
   private moveLocomotion: Locomotion | null = null
   private moveSpeed = LOCOMOTION_SPEED.walk
+
+  /** Per-model multiplier on gait speeds, derived from hip height. */
+  private speedScale = 1
   private readonly locomotionClips = new Map<Locomotion, THREE.AnimationClip>()
-  private readonly turnSpeed = 9 // radians / second
-  private readonly arriveRadius = 0.08
+  private readonly turnSpeed = 6 // radians / second
+  private readonly arriveRadius = 0.06
   // #endregion
 
   constructor (canvas: HTMLCanvasElement) {
@@ -106,9 +118,12 @@ export class VRMViewer {
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type    = THREE.PCFSoftShadowMap
     this.renderer.outputColorSpace  = THREE.SRGBColorSpace
+    // Cinematic tone mapping for punchier, dramatic contrast.
+    this.renderer.toneMapping         = THREE.ACESFilmicToneMapping
+    this.renderer.toneMappingExposure = 1.15
 
-    this.scene.background = new THREE.Color(0x0e1117)
-    this.scene.fog        = new THREE.Fog(0x0e1117, 8, 22)
+    this.scene.background = new THREE.Color(0x05060a)
+    this.scene.fog        = new THREE.Fog(0x05060a, 6, 26)
 
     this.camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 100)
     this.camera.position.set(0, 1.25, 3.4)
@@ -133,41 +148,70 @@ export class VRMViewer {
 
   // #region Environment
 
-  private buildEnvironment () {
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x32384a, 1.6)
+  /** Dramatic three-point-ish stage lighting: warm key, cool rim, magenta kicker. */
+  private buildLighting () {
+    // Dim cool fill so the directional lights carry the drama.
+    const hemi = new THREE.HemisphereLight(0x556080, 0x05060a, 0.35)
     this.scene.add(hemi)
 
-    const key = new THREE.DirectionalLight(0xffffff, 2.2)
-    key.position.set(3, 6, 4)
+    // Warm key light from the front-right, the only shadow caster.
+    const key = new THREE.DirectionalLight(0xffe6c4, 3.2)
+    key.position.set(5, 8, 4)
     key.castShadow = true
     key.shadow.mapSize.set(2048, 2048)
     key.shadow.camera.near   = 0.5
-    key.shadow.camera.far    = 25
-    key.shadow.camera.left   = -5
-    key.shadow.camera.right  = 5
-    key.shadow.camera.top    = 5
-    key.shadow.camera.bottom = -5
-    key.shadow.bias          = -0.0005
+    key.shadow.camera.far    = 30
+    key.shadow.camera.left   = -3.5
+    key.shadow.camera.right  = 3.5
+    key.shadow.camera.top    = 4
+    key.shadow.camera.bottom = -1
+    key.shadow.bias          = -0.0004
+    key.shadow.radius        = 3
     this.scene.add(key)
 
-    const rim = new THREE.DirectionalLight(0x6ea8fe, 0.8)
-    rim.position.set(-4, 3, -4)
+    // Cool back/rim light to carve the silhouette.
+    const rim = new THREE.DirectionalLight(0x3f6bff, 2.6)
+    rim.position.set(-6, 5, -6)
     this.scene.add(rim)
 
-    // Ground plane.
-    const ground = new THREE.Mesh(
-      new THREE.CircleGeometry(14, 64),
-      new THREE.MeshStandardMaterial({ color: 0x1a2030, roughness: 0.95, metalness: 0.0 }),
-    )
-    ground.rotation.x    = -Math.PI / 2
-    ground.receiveShadow = true
-    this.ground          = ground
-    this.scene.add(ground)
+    // Magenta accent kicker from the opposite side for a stage-lit feel.
+    const accent = new THREE.SpotLight(0xff2e7e, 40, 18, Math.PI / 5, 0.7, 1.5)
+    accent.position.set(-5, 4, 4)
+    accent.target.position.set(0, 1, 0)
+    this.scene.add(accent)
+    this.scene.add(accent.target)
+  }
 
-    const grid                                    = new THREE.GridHelper(28, 56, 0x2c3550, 0x222a3d);
+  private buildEnvironment () {
+    this.buildLighting()
+
+    // Reflective floor (real planar reflections) for a polished, dramatic stage.
+    const dpr   = Math.min(window.devicePixelRatio, 2)
+    const floor = new Reflector(new THREE.CircleGeometry(16, 80), {
+      clipBias:      0.003,
+      textureWidth:  Math.min(2048, Math.floor(window.innerWidth * dpr)),
+      textureHeight: Math.min(2048, Math.floor(window.innerHeight * dpr)),
+      color:         0x252b36,
+    })
+    floor.rotation.x = -Math.PI / 2
+    this.scene.add(floor)
+    this.ground = floor
+
+    // A separate shadow-catcher just above the mirror (Reflector can't receive
+    // shadows itself), kept subtle so reflections still read through.
+    const shadowCatcher = new THREE.Mesh(
+      new THREE.CircleGeometry(16, 80),
+      new THREE.ShadowMaterial({ opacity: 0.45 }),
+    )
+    shadowCatcher.rotation.x    = -Math.PI / 2
+    shadowCatcher.position.y    = 0.002
+    shadowCatcher.receiveShadow = true
+    this.scene.add(shadowCatcher)
+
+    const grid                                    = new THREE.GridHelper(32, 64, 0x3a4a6a, 0x1a2236);
     (grid.material as THREE.Material).transparent = true;
-    (grid.material as THREE.Material).opacity     = 0.5
-    grid.position.y                               = 0.001
+    (grid.material as THREE.Material).opacity     = 0.18
+    grid.position.y                               = 0.004
     this.scene.add(grid)
 
     // Destination marker shown while the model walks toward a tapped point.
@@ -199,6 +243,10 @@ export class VRMViewer {
     // VRM0 models face +Z; rotate them to face the camera. No-op for VRM1.
     VRMUtils.rotateVRM0(vrm)
     this.baseYaw = vrm.scene.rotation.y
+
+    // Scale gait speeds to this model's proportions so feet stay planted.
+    const hipHeight = vrm.humanoid.normalizedRestPose.hips?.position?.[1] ?? REFERENCE_HIP_HEIGHT
+    this.speedScale = THREE.MathUtils.clamp(hipHeight / REFERENCE_HIP_HEIGHT, 0.7, 1.4)
 
     // Give .vrma look-at tracks a concrete target (avoids a console warning and
     // lets the mixer drive eye direction).
@@ -533,7 +581,7 @@ export class VRMViewer {
       return
 
     this.moveLocomotion = gait
-    this.moveSpeed      = LOCOMOTION_SPEED[gait]
+    this.moveSpeed      = LOCOMOTION_SPEED[gait] * this.speedScale
 
     const clip = this.locomotionClips.get(gait) ??
       this.locomotionClips.get('walk') ??
@@ -560,20 +608,25 @@ export class VRMViewer {
     const dz       = this.moveTarget.z - root.position.z
     const distance = Math.hypot(dx, dz)
 
-    // Smoothly steer toward the destination (model faces +Z at baseYaw).
-    const desiredYaw = Math.atan2(dx, dz) + this.baseYaw
-    let diff = desiredYaw - root.rotation.y
-    diff = Math.atan2(Math.sin(diff), Math.cos(diff))
-
-    const maxTurn = this.turnSpeed * delta
-    root.rotation.y += THREE.MathUtils.clamp(diff, -maxTurn, maxTurn)
-
     if (distance <= this.arriveRadius) {
       this.onArrive()
       return
     }
 
-    const step = Math.min(this.moveSpeed * delta, distance)
+    // Steer toward the destination (model faces +Z at baseYaw). Turn speed eases
+    // off as the model aligns, so it doesn't snap — a smooth, natural turn.
+    const desiredYaw = Math.atan2(dx, dz) + this.baseYaw
+    let angle = desiredYaw - root.rotation.y
+    angle = Math.atan2(Math.sin(angle), Math.cos(angle))
+
+    const maxTurn = this.turnSpeed * delta
+    root.rotation.y += THREE.MathUtils.clamp(angle * 0.5, -maxTurn, maxTurn)
+
+    // Only advance once roughly facing the target: speed scales with alignment
+    // (cos of the remaining angle), so the model turns in place first instead of
+    // crabbing sideways toward the destination.
+    const alignment = Math.max(0, Math.cos(angle))
+    const step      = Math.min(this.moveSpeed * alignment * delta, distance)
     root.position.x += dx / distance * step
     root.position.z += dz / distance * step
   }
