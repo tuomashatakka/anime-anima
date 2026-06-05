@@ -1,0 +1,24 @@
+{
+  "name": "anime-anima",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "MVP three.js viewer for VRM models with switchable animations (VRMA + BVH).",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "download-assets": "node scripts/download-vrm-assets.mts"
+  },
+  "dependencies": {
+    "@pixiv/three-vrm": "^3.4.4",
+    "@pixiv/three-vrm-animation": "^3.4.4",
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.19",
+    "@types/three": "^0.180.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}
