@@ -54,6 +54,7 @@ async function main () {
     const catalog = await loadCatalog()
     toolbar.setModels(catalog.models)
     toolbar.setAnimations(catalog.animations)
+    viewer.setAvailableAnimations(catalog.animations)
 
     // Pick a sensible default model + a friendly default animation.
     const firstModel = catalog.models[0]

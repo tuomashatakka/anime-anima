@@ -19,6 +19,11 @@ playing animation, and animation changes are crossfade-tweened.
     transfer directly and only the hips translation is rescaled to each model.
 - **Crossfaded transitions** between animations (`AnimationAction.crossFadeFrom`).
 - **Toolbar popovers** with live filtering — one for models, one for animations.
+- **Click/tap to move** — tap the ground and the model turns and walks (or
+  jogs/crawls, whichever locomotion clip the pack provides) to that spot, then
+  returns to the selected animation. Root motion is driven in code with the
+  locomotion clip's horizontal hips translation zeroed so the legs cycle in
+  place.
 
 ## Assets
 
