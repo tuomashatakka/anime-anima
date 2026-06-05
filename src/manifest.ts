@@ -1,6 +1,13 @@
 import type { AnimationEntry, AnimationKind, AssetManifest, ModelEntry } from './types'
 
-const MANIFEST_URL = `${import.meta.env.BASE_URL}vrm-assets/manifest.json`
+const BASE = import.meta.env.BASE_URL
+const MANIFEST_URL = `${BASE}vrm-assets/manifest.json`
+
+/** Manifest paths are absolute ("/vrm-assets/…"); prefix them with the app base
+ *  so they resolve correctly when hosted under a sub-path (e.g. GitHub Pages). */
+function withBase (path: string): string {
+  return BASE.replace(/\/$/, '') + path
+}
 
 /** Turn "action_attention_seeking.bvh" into "Attention Seeking". */
 function prettify (url: string, stripPrefixes: string[] = []): string {
@@ -32,7 +39,7 @@ export async function loadCatalog (): Promise<AssetCatalog> {
   const manifest = await response.json() as AssetManifest
 
   const models: ModelEntry[] = (manifest.models ?? [])
-    .map(url => ({ name: prettify(url), url }))
+    .map(url => ({ name: prettify(url), url: withBase(url) }))
     .sort((a, b) => a.name.localeCompare(b.name))
 
   // The download script routes every file in `animation_nitral-fork` into the
@@ -50,7 +57,7 @@ export async function loadCatalog (): Promise<AssetCatalog> {
     })
     .map(url => {
       const kind = kindOf(url)
-      return kind ? { name: prettify(url, ['action_', 'motion_']), url, kind } : null
+      return kind ? { name: prettify(url, ['action_', 'motion_']), url: withBase(url), kind } : null
     })
     .filter((entry): entry is AnimationEntry => entry !== null)
     .sort((a, b) => a.name.localeCompare(b.name))
