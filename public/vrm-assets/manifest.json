@@ -3,23 +3,11 @@
   "fetchedAt": "2026-06-05T00:54:32.323Z",
   "models": [
     "/vrm-assets/models/Aera.vrm",
-    "/vrm-assets/models/AvatarSample_A.vrm",
-    "/vrm-assets/models/AvatarSample_B.vrm",
-    "/vrm-assets/models/AvatarSample_C.vrm",
-    "/vrm-assets/models/Avatar_Orion.vrm",
     "/vrm-assets/models/Dhahlia.vrm",
-    "/vrm-assets/models/Epithet.vrm",
     "/vrm-assets/models/Lara Lightland.vrm",
     "/vrm-assets/models/Onyx.vrm",
     "/vrm-assets/models/Seed-san.vrm",
-    "/vrm-assets/models/Sendagaya_Shibu.vrm",
-    "/vrm-assets/models/Sendagaya_Shino.vrm",
-    "/vrm-assets/models/Velara.vrm",
-    "/vrm-assets/models/Victoria_Rubin.vrm",
-    "/vrm-assets/models/Vita.vrm",
-    "/vrm-assets/models/Vivi.vrm",
-    "/vrm-assets/models/fem_vroid.vrm",
-    "/vrm-assets/models/masc_vroid.vrm"
+    "/vrm-assets/models/Velara.vrm"
   ],
   "animations": {
     "vrma": [

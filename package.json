@@ -11,7 +11,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "download-assets": "node scripts/download-vrm-assets.mts",
-    "classify-animations": "node scripts/classify-animations.mts"
+    "classify-animations": "node scripts/classify-animations.mts",
+    "fetch-osa": "node scripts/fetch-osa-avatars.mts"
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.4.4",

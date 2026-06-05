@@ -23,8 +23,23 @@ export interface ModelEntry {
   /** Human-friendly display name. */
   name: string
 
-  /** Public URL to the .vrm file. */
+  /** URL to the .vrm file (local under BASE, or an absolute external URL). */
   url: string
+
+  /** Collection / source label shown as a tag in the picker. */
+  group?: string
+
+  /** Optional preview image URL. */
+  thumbnail?: string
+}
+
+/** Shape of public/vrm-assets/osa-avatars.json produced by scripts/fetch-osa-avatars.mts */
+export interface OsaAvatarsFile {
+  source:    string
+  license:   string
+  fetchedAt: string
+  count:     number
+  avatars:   { name: string, url: string, project: string, thumbnail?: string }[]
 }
 
 export interface AnimationEntry {

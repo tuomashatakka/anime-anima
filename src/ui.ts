@@ -92,7 +92,8 @@ class Popover {
 
     const needle  = filter.trim().toLowerCase()
     const matches = needle
-      ? this.items.filter(item => item.label.toLowerCase().includes(needle))
+      ? this.items.filter(item =>
+        item.label.toLowerCase().includes(needle) || (item.tag?.toLowerCase().includes(needle) ?? false))
       : this.items
 
     if (matches.length === 0) {
@@ -103,7 +104,9 @@ class Popover {
       return
     }
 
-    for (const item of matches) {
+    // Cap the DOM size for huge catalogs (thousands of avatars); searching narrows it.
+    const visible = matches.slice(0, Popover.MAX_RENDER)
+    for (const item of visible) {
       const button     = document.createElement('button')
       button.className = 'popover-item' + (item.id === this.activeId ? ' active' : '')
 
@@ -124,7 +127,16 @@ class Popover {
       })
       list.appendChild(button)
     }
+
+    if (matches.length > visible.length) {
+      const more       = document.createElement('div')
+      more.className   = 'popover-empty'
+      more.textContent = `Showing ${visible.length} of ${matches.length} — type to filter`
+      list.appendChild(more)
+    }
   }
+
+  private static readonly MAX_RENDER = 150
 
   private readonly onDocumentClick = () => this.close()
   private readonly onKeydown = (event: KeyboardEvent) => {
@@ -187,7 +199,7 @@ export class Toolbar {
 
   setModels (models: ModelEntry[]) {
     this.models = models
-    this.modelPopover.setItems(models.map(model => ({ id: model.url, label: model.name })))
+    this.modelPopover.setItems(models.map(model => ({ id: model.url, label: model.name, tag: model.group })))
   }
 
   setAnimations (animations: AnimationEntry[]) {
