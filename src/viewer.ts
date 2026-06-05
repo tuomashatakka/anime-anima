@@ -1,53 +1,22 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import { BVHLoader } from 'three/examples/jsm/loaders/BVHLoader.js'
 import { Reflector } from 'three/examples/jsm/objects/Reflector.js'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
+import { FilmPass } from 'three/examples/jsm/postprocessing/FilmPass.js'
+import { LUTPass } from 'three/examples/jsm/postprocessing/LUTPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { VignetteShader } from 'three/examples/jsm/shaders/VignetteShader.js'
-import { VRM, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
-import type { VRMHumanBoneName } from '@pixiv/three-vrm'
-import {
-  VRMAnimation,
-  VRMAnimationLoaderPlugin,
-  VRMLookAtQuaternionProxy,
-  createVRMAnimationClip,
-} from '@pixiv/three-vrm-animation'
-import { AnimationLibrary } from './library'
-import type { AnimationEntry, Locomotion, ModelEntry, Stance } from './types'
-import { STANCE_LEVEL } from './types'
+import { Lensflare, LensflareElement } from 'three/examples/jsm/objects/Lensflare.js'
+import { CharacterController } from './character'
+import { FurnitureManager } from './furniture'
+import { FurnitureStore } from './furniture-store'
+import { WallTool } from './walls'
+import { createCinematicLUT } from './lut'
+import type { AnimationEntry, ModelEntry } from './types'
 
-
-interface BVHResult {
-  clip:     THREE.AnimationClip
-  skeleton: THREE.Skeleton
-}
-
-interface PlayOptions {
-  fade?:       boolean
-  transition?: boolean
-}
-
-/**
- * Ground travel speed (metres / second) for each gait, for a model with ~0.9 m
- * hips. These match the average backward speed of the planted foot in the
- * (in-place) source clips, so the feet do not slide; they are scaled per-model
- * by hip height at load time.
- */
-const LOCOMOTION_SPEED: Record<Locomotion, number> = { walk: 0.82, jog: 1.12, run: 2.3, crawl: 0.44 }
-
-/** Hip height (metres) the LOCOMOTION_SPEED values were measured against. */
-const REFERENCE_HIP_HEIGHT = 0.9
-
-/** Order gaits escalate through on repeated taps while standing. */
-const GAIT_ESCALATION: Record<Locomotion, Locomotion> = { walk: 'jog', jog: 'run', run: 'run', crawl: 'crawl' }
-
-/** The shape of the three.js AnimationMixer "finished" event we care about. */
-type MixerFinishedEvent = { action: THREE.AnimationAction }
 
 export type LightingPreset = 'studio' | 'soft' | 'neon' | 'sunset'
 
@@ -70,52 +39,47 @@ export const LIGHTING_PRESETS: { id: LightingPreset, label: string }[] = [
 
 const LIGHTING_CONFIG: Record<LightingPreset, LightingConfig> = {
   studio: {
-    background: 0x05060a,
-    exposure:   1.15,
-    fog:        [ 6, 26 ],
-    hemi:       [ 0x556080, 0x05060a, 0.35 ],
-    key:        [ 0xffe6c4, 3.2, [ 5, 8, 4 ]],
-    rim:        [ 0x3f6bff, 2.6, [ -6, 5, -6 ]],
-    accent:     [ 0xff2e7e, 40, [ -5, 4, 4 ]],
+    background: 0x0b0e16,
+    exposure:   1.45,
+    fog:        [ 8, 30 ],
+    hemi:       [ 0x6f7ea8, 0x10131c, 0.75 ],
+    key:        [ 0xffe6c4, 3.9, [ 5, 8, 4 ]],
+    rim:        [ 0x4f7bff, 2.9, [ -6, 5, -6 ]],
+    accent:     [ 0xff2e7e, 42, [ -5, 4, 4 ]],
   },
   soft: {
-    background: 0x1a1d24,
-    exposure:   1.0,
-    fog:        [ 10, 32 ],
-    hemi:       [ 0xb8c4e0, 0x404654, 0.9 ],
-    key:        [ 0xfff4e8, 2.2, [ 4, 7, 5 ]],
-    rim:        [ 0xbfd0ff, 1.0, [ -4, 4, -5 ]],
+    background: 0x262b35,
+    exposure:   1.32,
+    fog:        [ 12, 36 ],
+    hemi:       [ 0xc8d2ec, 0x4a505e, 1.25 ],
+    key:        [ 0xfff4e8, 2.9, [ 4, 7, 5 ]],
+    rim:        [ 0xbfd0ff, 1.3, [ -4, 4, -5 ]],
     accent:     [ 0xffffff, 0, [ -5, 4, 4 ]],
   },
   neon: {
-    background: 0x04030a,
-    exposure:   1.25,
-    fog:        [ 5, 22 ],
-    hemi:       [ 0x202040, 0x04030a, 0.2 ],
-    key:        [ 0x00e5ff, 2.6, [ 5, 6, 4 ]],
-    rim:        [ 0xff00aa, 3.0, [ -6, 5, -5 ]],
-    accent:     [ 0x9b5cff, 55, [ -4, 4, 5 ]],
+    background: 0x0a0814,
+    exposure:   1.5,
+    fog:        [ 6, 24 ],
+    hemi:       [ 0x303060, 0x0a0814, 0.5 ],
+    key:        [ 0x00e5ff, 3.0, [ 5, 6, 4 ]],
+    rim:        [ 0xff00aa, 3.3, [ -6, 5, -5 ]],
+    accent:     [ 0x9b5cff, 58, [ -4, 4, 5 ]],
   },
   sunset: {
-    background: 0x140a10,
-    exposure:   1.2,
-    fog:        [ 7, 28 ],
-    hemi:       [ 0x6a4a6a, 0x180c10, 0.5 ],
-    key:        [ 0xffb066, 3.4, [ 6, 5, 3 ]],
-    rim:        [ 0xff5e8a, 2.0, [ -5, 4, -6 ]],
-    accent:     [ 0x4060ff, 18, [ -5, 5, 5 ]],
+    background: 0x1d1018,
+    exposure:   1.5,
+    fog:        [ 9, 32 ],
+    hemi:       [ 0x8a647e, 0x241016, 0.9 ],
+    key:        [ 0xffb066, 4.0, [ 6, 5, 3 ]],
+    rim:        [ 0xff5e8a, 2.3, [ -5, 4, -6 ]],
+    accent:     [ 0x4060ff, 20, [ -5, 5, 5 ]],
   },
 }
 
 /**
- * Owns the three.js scene and everything VRM-related: loading models, loading
- * animations (both .vrma and .bvh), crossfading between clips, click-to-move
- * locomotion, and a pose state machine (standing / crouching / sitting / lying)
- * that inserts the correct transition animation between stances and plays random
- * idles when nothing is selected.
- *
- * Both animation formats are compiled into AnimationClips that target the VRM's
- * *normalized* humanoid bones, so a single AnimationMixer drives everything.
+ * Owns the three.js scene, renderer, camera and post-processing stack. Avatar
+ * loading, animation and click-to-move locomotion live in a CharacterController;
+ * the viewer drives it from the render loop and feeds it tapped destinations.
  */
 export class VRMViewer {
   private readonly renderer: THREE.WebGLRenderer
@@ -124,9 +88,7 @@ export class VRMViewer {
   private readonly controls: OrbitControls
   private readonly clock = new THREE.Clock()
 
-  private readonly gltfLoader = new GLTFLoader()
-  private readonly vrmaLoader = new GLTFLoader()
-  private readonly bvhLoader = new BVHLoader()
+  private readonly character: CharacterController
 
   // #region Rendering / lighting / settings
   private hemi!:   THREE.HemisphereLight
@@ -134,60 +96,30 @@ export class VRMViewer {
   private rim!:    THREE.DirectionalLight
   private accent!: THREE.SpotLight
 
-  private composer:   EffectComposer | null = null
-  private bloomPass:  UnrealBloomPass | null = null
+  private composer:    EffectComposer | null = null
+  private bloomPass:   UnrealBloomPass | null = null
+  private godRaysPass: ShaderPass | null = null
   private postEnabled = false
   private resolutionScale = 1
+
+  // #region Camera follow
+  /** Vertical aim height of the followed model (its bbox centre). */
+  private modelCenterY = 1.0
+  private followEnabled = true
+  private readonly followTmp = new THREE.Vector3()
+  // #endregion
   private fpsVisible = false
   private fpsElement: HTMLElement | null = document.getElementById('fps')
   private fpsAccum = 0
   private fpsFrames = 0
   // #endregion
 
-  private currentVRM:    VRM | null = null
-  private mixer:         THREE.AnimationMixer | null = null
-  private currentAction: THREE.AnimationAction | null = null
-
-  /** Raw, model-agnostic animation data, cached after first download. */
-  private readonly vrmaCache = new Map<string, VRMAnimation>()
-  private readonly bvhCache = new Map<string, BVHResult>()
-
-  private readonly fadeDuration = 0.45
-
-  // #region Pose state machine
-  private library:           AnimationLibrary | null = null
-  private currentStance:     Stance = 'standing'
-  private selectedAnimation: AnimationEntry | null = null
-
-  /** Called once when the active (one-shot) clip reaches its end. */
-  private onFinishCallback: (() => void) | null = null
-
-  private idleMode = false
-  private idleSwitching = false
-  private idleHold = 0
-  private lastIdleUrl: string | null = null
-  // #endregion
-
-  // #region Click-to-move state
+  // #region Click-to-move (tap detection only; locomotion lives in the character)
   private readonly canvas: HTMLCanvasElement
   private ground!:         THREE.Mesh
-  private marker!:         THREE.Mesh
   private readonly raycaster = new THREE.Raycaster()
   private readonly pointer = new THREE.Vector2()
   private pointerDown = { x: 0, y: 0, time: 0 }
-
-  /** Yaw applied at load (0 for VRM1, π for VRM0) — the "facing +Z" baseline. */
-  private baseYaw = 0
-  private moveTarget:     THREE.Vector3 | null = null
-  private isMoving = false
-  private moveLocomotion: Locomotion | null = null
-  private moveSpeed = LOCOMOTION_SPEED.walk
-
-  /** Per-model multiplier on gait speeds, derived from hip height. */
-  private speedScale = 1
-  private readonly locomotionClips = new Map<Locomotion, THREE.AnimationClip>()
-  private readonly turnSpeed = 6 // radians / second
-  private readonly arriveRadius = 0.06
   // #endregion
 
   constructor (canvas: HTMLCanvasElement) {
@@ -215,9 +147,10 @@ export class VRMViewer {
     this.controls.minDistance   = 1.2
     this.controls.maxDistance   = 12
     this.controls.maxPolarAngle = Math.PI * 0.95
+    // Camera follows the avatar: rotation + zoom only, never panning.
+    this.controls.enablePan = false
 
-    this.gltfLoader.register(parser => new VRMLoaderPlugin(parser))
-    this.vrmaLoader.register(parser => new VRMAnimationLoaderPlugin(parser))
+    this.character = new CharacterController(this.scene)
 
     this.buildEnvironment()
     window.addEventListener('resize', this.onResize)
@@ -253,7 +186,27 @@ export class VRMViewer {
     this.accent.target.position.set(0, 1, 0)
     this.scene.add(this.accent, this.accent.target)
 
+    this.attachLensflare()
     this.setLighting('studio')
+  }
+
+  /**
+   * A strong, procedurally-textured lens flare riding on the key light. The
+   * flare sprites are screen-space and occlusion-tested, so they bloom in only
+   * when the light is actually visible — pairs with the god-rays pass.
+   */
+  private attachLensflare (): void {
+    const main  = makeFlareTexture(256, 0.0, 'rgba(255,238,200,1)')
+    const ghost = makeFlareTexture(128, 0.25, 'rgba(160,200,255,0.9)')
+
+    const flare = new Lensflare()
+    flare.addElement(new LensflareElement(main, 700, 0, this.key.color))
+    flare.addElement(new LensflareElement(ghost, 90, 0.55))
+    flare.addElement(new LensflareElement(ghost, 140, 0.65))
+    flare.addElement(new LensflareElement(ghost, 70, 0.8))
+    flare.addElement(new LensflareElement(ghost, 110, 0.95))
+    flare.addElement(new LensflareElement(main, 60, 1.0))
+    this.key.add(flare)
   }
 
   /** Apply a named lighting preset (background, fog, exposure and all lights). */
@@ -305,124 +258,44 @@ export class VRMViewer {
     (grid.material as THREE.Material).opacity     = 0.18
     grid.position.y                               = 0.004
     this.scene.add(grid)
-
-    // Destination marker shown while the model walks toward a tapped point.
-    this.marker = new THREE.Mesh(
-      new THREE.RingGeometry(0.12, 0.2, 40),
-      new THREE.MeshBasicMaterial({ color: 0x6ea8fe, transparent: true, opacity: 0.85, side: THREE.DoubleSide }),
-    )
-    this.marker.rotation.x = -Math.PI / 2
-    this.marker.position.y = 0.02
-    this.marker.visible    = false
-    this.scene.add(this.marker)
   }
 
   // #endregion
 
-  // #region Model loading
+  // #region Model + animation (delegated to the character controller)
 
   async loadModel (entry: ModelEntry): Promise<void> {
-    const gltf = await this.gltfLoader.loadAsync(entry.url)
-    const vrm  = gltf.userData.vrm as VRM
-
-    // Perf housekeeping recommended by three-vrm.
-    try {
-      VRMUtils.removeUnnecessaryVertices(gltf.scene)
-      VRMUtils.combineSkeletons(gltf.scene)
-    }
-    catch { /* optional optimisation — ignore if unsupported by a model */ }
-
-    // VRM0 models face +Z; rotate them to face the camera. No-op for VRM1.
-    VRMUtils.rotateVRM0(vrm)
-    this.baseYaw = vrm.scene.rotation.y
-
-    // Scale gait speeds to this model's proportions so feet stay planted.
-    const hipHeight = vrm.humanoid.normalizedRestPose.hips?.position?.[1] ?? REFERENCE_HIP_HEIGHT
-    this.speedScale = THREE.MathUtils.clamp(hipHeight / REFERENCE_HIP_HEIGHT, 0.7, 1.4)
-
-    // Give .vrma look-at tracks a concrete target (avoids a console warning and
-    // lets the mixer drive eye direction).
-    if (vrm.lookAt) {
-      const lookAtProxy = new VRMLookAtQuaternionProxy(vrm.lookAt)
-      lookAtProxy.name  = 'VRMLookAtQuaternionProxy'
-      vrm.scene.add(lookAtProxy)
-    }
-
-    vrm.scene.traverse(object => {
-      if ((object as THREE.Mesh).isMesh) {
-        object.castShadow    = true
-        object.receiveShadow = true
-      }
-    })
-
-    // Swap out the old model.
-    this.disposeCurrentModel()
-    this.cancelMovement()
-    this.currentVRM = vrm
-    this.scene.add(vrm.scene)
-
-    this.mixer = new THREE.AnimationMixer(vrm.scene)
-    this.mixer.addEventListener('finished', this.onMixerFinished)
-    this.currentAction    = null
-    this.onFinishCallback = null
-    this.currentStance    = 'standing'
-
-    this.frameCamera(vrm)
-
-    // Pre-build locomotion clips for this rig so the first tap is instant.
-    await this.prepareLocomotion(vrm)
-
-    // Re-apply the active selection to the new rig, or fall back to idle.
-    if (this.selectedAnimation)
-      await this.playAnimation(this.selectedAnimation, { fade: false, transition: false })
-    else
-      await this.enterIdle(false)
+    await this.character.loadModel(entry)
+    this.frameCamera()
   }
 
   /** Index the catalog so the state machine can pick idles / transitions / gaits. */
   setAvailableAnimations (animations: AnimationEntry[]): void {
-    this.library = new AnimationLibrary(animations)
+    this.character.setAvailableAnimations(animations)
   }
 
-  private async prepareLocomotion (vrm: VRM): Promise<void> {
-    this.locomotionClips.clear()
-    if (!this.library)
+  async playAnimation (entry: AnimationEntry): Promise<void> {
+    await this.character.playAnimation(entry)
+  }
+
+  clearSelection (): void {
+    this.character.clearSelection()
+  }
+
+  /** Frame the camera around the avatar's bounding box. */
+  private frameCamera () {
+    const object = this.character.object
+    if (!object)
       return
 
-    for (const type of [ 'walk', 'jog', 'run', 'crawl' ] as Locomotion[]) {
-      const entry = this.library.locomotion(type)
-      if (!entry)
-        continue
-      try {
-        const clip = await this.buildRawClip(entry, vrm)
-        stripHorizontalRootMotion(clip, vrm)
-        clip.name = `__loco_${type}`
-        this.locomotionClips.set(type, clip)
-      }
-      catch (error) {
-        console.warn(`Could not prepare ${type} animation`, error)
-      }
-    }
-  }
-
-  private disposeCurrentModel () {
-    if (!this.currentVRM)
-      return
-    this.mixer?.removeEventListener('finished', this.onMixerFinished)
-    this.mixer?.stopAllAction()
-    this.scene.remove(this.currentVRM.scene)
-    VRMUtils.deepDispose(this.currentVRM.scene)
-    this.currentVRM = null
-  }
-
-  private frameCamera (vrm: VRM) {
-    const box    = new THREE.Box3().setFromObject(vrm.scene)
+    const box    = new THREE.Box3().setFromObject(object)
     const size   = new THREE.Vector3()
     const center = new THREE.Vector3()
     box.getSize(size)
     box.getCenter(center)
 
-    const height = size.y || 1.5
+    const height      = size.y || 1.5
+    this.modelCenterY = center.y
     this.controls.target.set(center.x, center.y, center.z)
     this.camera.position.set(center.x, center.y + height * 0.1, center.z + height * 1.9)
     this.controls.update()
@@ -430,185 +303,7 @@ export class VRMViewer {
 
   // #endregion
 
-  // #region Animation playback
-
-  /**
-   * Play a user-selected animation. If it lives in a different stance than the
-   * model currently holds and a transition animation exists, the transition is
-   * played first; afterwards the clip itself plays (looped, or once then idle).
-   */
-  async playAnimation (entry: AnimationEntry, options: PlayOptions = {}): Promise<void> {
-    const { fade = true, transition = true } = options
-    this.cancelMovement()
-    this.idleMode          = false
-    this.onFinishCallback  = null
-    this.selectedAnimation = entry
-    if (!this.currentVRM || !this.mixer)
-      return
-
-    const meta = entry.meta
-
-    // A transition clip selected directly: play once, then settle into its end.
-    if (meta?.isTransition) {
-      const clip = await this.buildRawClip(entry, this.currentVRM)
-      clip.name  = entry.name
-      this.playClip(clip, fade, false)
-      this.onFinishCallback = () => {
-        this.currentStance     = meta.endStance
-        this.selectedAnimation = null
-        void this.enterIdle(true)
-      }
-      return
-    }
-
-    const destStance = meta?.stance ?? 'standing'
-    if (transition && destStance !== this.currentStance && this.library) {
-      const transitionEntry = this.library.findTransition(this.currentStance, destStance)
-      if (transitionEntry) {
-        const clip = await this.buildRawClip(transitionEntry, this.currentVRM)
-        clip.name  = transitionEntry.name
-        this.playClip(clip, fade, false)
-        this.onFinishCallback = () => {
-          this.currentStance = destStance
-          void this.playSelectedClip(entry, true)
-        }
-        return
-      }
-    }
-
-    this.currentStance = destStance
-    await this.playSelectedClip(entry, fade)
-  }
-
-  /** Play the entry's own clip — looped if it loops smoothly, else once → idle. */
-  private async playSelectedClip (entry: AnimationEntry, fade: boolean): Promise<void> {
-    if (!this.currentVRM)
-      return
-
-    const clip = await this.buildRawClip(entry, this.currentVRM)
-    clip.name  = entry.name
-
-    if (entry.meta?.loopable ?? true) {
-      this.playClip(clip, fade, true)
-      return
-    }
-
-    // One-shot: when it finishes, drop into the ending stance's idle.
-    this.playClip(clip, fade, false)
-    this.onFinishCallback = () => {
-      this.currentStance     = entry.meta?.endStance ?? this.currentStance
-      this.selectedAnimation = null
-      void this.enterIdle(true)
-    }
-  }
-
-  /** Clear the selection and start random idles for the current stance. */
-  clearSelection (): void {
-    this.selectedAnimation = null
-    this.onFinishCallback  = null
-    this.cancelMovement()
-    void this.enterIdle(true)
-  }
-
-  private async enterIdle (fade: boolean): Promise<void> {
-    this.idleMode = true
-    await this.playNextIdle(fade)
-  }
-
-  private async playNextIdle (fade: boolean): Promise<void> {
-    if (!this.library || !this.currentVRM || this.idleSwitching)
-      return
-
-    const pool = this.library.idles(this.currentStance)
-    // Schedule the next switch even if the pool is empty/static.
-    this.idleHold = 8 + Math.random() * 8
-    if (!pool.length)
-      return
-
-    let entry = pool[Math.floor(Math.random() * pool.length)]
-    if (pool.length > 1 && entry.url === this.lastIdleUrl)
-      entry = pool[(pool.indexOf(entry) + 1) % pool.length]
-    this.lastIdleUrl = entry.url
-
-    this.idleSwitching = true
-    try {
-      const clip            = await this.buildRawClip(entry, this.currentVRM)
-      clip.name             = entry.name
-      this.onFinishCallback = null
-      this.playClip(clip, fade, true)
-    }
-    finally {
-      this.idleSwitching = false
-    }
-  }
-
-  /** Build a playable clip for an entry, zeroing root travel for locomotion clips. */
-  private async buildRawClip (entry: AnimationEntry, vrm: VRM): Promise<THREE.AnimationClip> {
-    const clip = entry.kind === 'vrma'
-      ? await this.buildVRMAClip(entry, vrm)
-      : await this.buildBVHClip(entry, vrm)
-    if (entry.meta?.category === 'locomotion')
-      stripHorizontalRootMotion(clip, vrm)
-    return clip
-  }
-
-  private playClip (clip: THREE.AnimationClip, fade: boolean, loop: boolean): THREE.AnimationAction {
-    const action = this.mixer!.clipAction(clip)
-    action.reset()
-    if (loop) {
-      action.setLoop(THREE.LoopRepeat, Infinity)
-      action.clampWhenFinished = false
-    }
-    else {
-      action.setLoop(THREE.LoopOnce, 1)
-      action.clampWhenFinished = true
-    }
-    action.enabled = true
-    action.setEffectiveTimeScale(1)
-    action.setEffectiveWeight(1)
-    action.play()
-
-    if (fade && this.currentAction && this.currentAction !== action)
-      action.crossFadeFrom(this.currentAction, this.fadeDuration, true)
-
-    this.currentAction = action
-    return action
-  }
-
-  private readonly onMixerFinished = (event: MixerFinishedEvent) => {
-    if (event.action !== this.currentAction || !this.onFinishCallback)
-      return
-
-    const callback        = this.onFinishCallback
-    this.onFinishCallback = null
-    callback()
-  }
-
-  private async buildVRMAClip (entry: AnimationEntry, vrm: VRM): Promise<THREE.AnimationClip> {
-    let animation = this.vrmaCache.get(entry.url)
-    if (!animation) {
-      const gltf       = await this.vrmaLoader.loadAsync(entry.url)
-      const animations = gltf.userData.vrmAnimations as VRMAnimation[] | undefined
-      if (!animations?.length)
-        throw new Error(`No VRM animation found in ${entry.url}`)
-      animation = animations[0]
-      this.vrmaCache.set(entry.url, animation)
-    }
-    return createVRMAnimationClip(animation, vrm)
-  }
-
-  private async buildBVHClip (entry: AnimationEntry, vrm: VRM): Promise<THREE.AnimationClip> {
-    let bvh = this.bvhCache.get(entry.url)
-    if (!bvh) {
-      bvh = await this.bvhLoader.loadAsync(entry.url) as BVHResult
-      this.bvhCache.set(entry.url, bvh)
-    }
-    return retargetBVHToVRM(bvh, vrm)
-  }
-
-  // #endregion
-
-  // #region Click-to-move
+  // #region Click-to-move (tap detection)
 
   private readonly onPointerDown = (event: PointerEvent) => {
     this.pointerDown = { x: event.clientX, y: event.clientY, time: performance.now() }
@@ -625,7 +320,7 @@ export class VRMViewer {
   }
 
   private handleTap (clientX: number, clientY: number) {
-    if (!this.currentVRM || this.locomotionClips.size === 0)
+    if (!this.character.hasModel)
       return
 
     const rect     = this.canvas.getBoundingClientRect()
@@ -645,91 +340,7 @@ export class VRMViewer {
       point.multiplyScalar(maxRadius / radius)
     point.y = 0
 
-    this.setMoveTarget(point)
-  }
-
-  private setMoveTarget (point: THREE.Vector3) {
-    this.moveTarget = point
-    this.marker.position.set(point.x, 0.02, point.z)
-    this.marker.visible   = true
-    this.idleMode         = false
-    this.onFinishCallback = null
-
-    // Low stances crawl; standing escalates walk → jog → run on repeated taps.
-    let gait: Locomotion
-    if (STANCE_LEVEL[this.currentStance] <= STANCE_LEVEL.sitting)
-      gait = 'crawl'
-    else if (!this.isMoving || !this.moveLocomotion)
-      gait = 'walk'
-    else
-      gait = GAIT_ESCALATION[this.moveLocomotion]
-
-    this.startGait(gait)
-    this.isMoving = true
-  }
-
-  private startGait (gait: Locomotion) {
-    if (this.isMoving && this.moveLocomotion === gait)
-      return
-
-    this.moveLocomotion = gait
-    this.moveSpeed      = LOCOMOTION_SPEED[gait] * this.speedScale
-
-    const clip = this.locomotionClips.get(gait) ??
-      this.locomotionClips.get('walk') ??
-      this.locomotionClips.values().next().value
-    if (clip)
-      this.playClip(clip, true, true)
-  }
-
-  private cancelMovement () {
-    this.moveTarget     = null
-    this.isMoving       = false
-    this.moveLocomotion = null
-    if (this.marker)
-      this.marker.visible = false
-  }
-
-  private updateMovement (delta: number) {
-    if (!this.moveTarget || !this.currentVRM)
-      return
-
-    const root = this.currentVRM.scene
-
-    const dx       = this.moveTarget.x - root.position.x
-    const dz       = this.moveTarget.z - root.position.z
-    const distance = Math.hypot(dx, dz)
-
-    if (distance <= this.arriveRadius) {
-      this.onArrive()
-      return
-    }
-
-    // Steer toward the destination (model faces +Z at baseYaw). Turn speed eases
-    // off as the model aligns, so it doesn't snap — a smooth, natural turn.
-    const desiredYaw = Math.atan2(dx, dz) + this.baseYaw
-    let angle = desiredYaw - root.rotation.y
-    angle = Math.atan2(Math.sin(angle), Math.cos(angle))
-
-    const maxTurn = this.turnSpeed * delta
-    root.rotation.y += THREE.MathUtils.clamp(angle * 0.5, -maxTurn, maxTurn)
-
-    // Only advance once roughly facing the target: speed scales with alignment
-    // (cos of the remaining angle), so the model turns in place first instead of
-    // crabbing sideways toward the destination.
-    const alignment = Math.max(0, Math.cos(angle))
-    const step      = Math.min(this.moveSpeed * alignment * delta, distance)
-    root.position.x += dx / distance * step
-    root.position.z += dz / distance * step
-  }
-
-  private onArrive () {
-    this.cancelMovement()
-    // Resume the selection (re-inserting a stance transition if needed) or idle.
-    if (this.selectedAnimation)
-      void this.playAnimation(this.selectedAnimation)
-    else
-      void this.enterIdle(true)
+    this.character.moveTo(point)
   }
 
   // #endregion
@@ -737,20 +348,14 @@ export class VRMViewer {
   private readonly tick = () => {
     const delta = this.clock.getDelta()
 
-    // Random idle rotation when nothing is selected and the model is at rest.
-    if (this.idleMode && !this.isMoving && !this.onFinishCallback && !this.idleSwitching) {
-      this.idleHold -= delta
-      if (this.idleHold <= 0)
-        void this.playNextIdle(true)
-    }
-
-    this.updateMovement(delta)
-    this.mixer?.update(delta)
-    this.currentVRM?.update(delta)
+    this.character.update(delta)
+    this.updateFollow()
     this.controls.update()
 
-    if (this.postEnabled && this.composer)
+    if (this.postEnabled && this.composer) {
+      this.updateGodRays()
       this.composer.render()
+    }
     else
       this.renderer.render(this.scene, this.camera)
 
@@ -777,13 +382,39 @@ export class VRMViewer {
   }
 
   private buildComposer () {
-    const composer = new EffectComposer(this.renderer)
+    // A non-multisampled HDR target: the Lensflare's occlusion read
+    // (copyFramebufferToTexture) is invalid against a multisampled framebuffer,
+    // which would spam GL_INVALID_OPERATION every frame once post is enabled.
+    const drawingSize = this.renderer.getDrawingBufferSize(new THREE.Vector2())
+    const renderTarget = new THREE.WebGLRenderTarget(drawingSize.x, drawingSize.y, {
+      type:    THREE.HalfFloatType,
+      samples: 0,
+    })
+    const composer = new EffectComposer(this.renderer, renderTarget)
     composer.addPass(new RenderPass(this.scene, this.camera))
 
+    // Bloom: softer/dimmer with a lower threshold (more of the frame blooms) and
+    // a longer radius for a wider, dreamier falloff.
     const bloom = new UnrealBloomPass(
-      new THREE.Vector2(window.innerWidth, window.innerHeight), 0.45, 0.5, 0.85,
+      new THREE.Vector2(window.innerWidth, window.innerHeight), 0.35, 0.9, 0.6,
     )
     composer.addPass(bloom)
+
+    // God rays — screen-space radial light scattering from the key light.
+    const godRays                   = new ShaderPass(GodRaysShader)
+    godRays.uniforms.exposure.value = 0.5
+    godRays.uniforms.decay.value    = 0.95
+    godRays.uniforms.density.value  = 0.92
+    godRays.uniforms.weight.value   = 0.5
+    composer.addPass(godRays)
+
+    // Strong, animated film grain.
+    const film = new FilmPass(0.6, false)
+    composer.addPass(film)
+
+    // Cinematic colour grade (teal/orange split-tone, mild contrast + saturation).
+    const lut       = new LUTPass({ lut: createCinematicLUT(33), intensity: 0.9 })
+    composer.addPass(lut)
 
     const vignette                   = new ShaderPass(VignetteShader)
     vignette.uniforms.offset.value   = 0.95
@@ -791,8 +422,74 @@ export class VRMViewer {
     composer.addPass(vignette)
 
     composer.addPass(new OutputPass())
-    this.composer  = composer
-    this.bloomPass = bloom
+    this.composer    = composer
+    this.bloomPass   = bloom
+    this.godRaysPass = godRays
+  }
+
+  /**
+   * Project the key light into screen space each frame and feed the god-rays
+   * pass. The rays fade out as the light leaves the frustum or slips behind the
+   * camera, so they never streak from a phantom off-screen point.
+   */
+  private updateGodRays (): void {
+    if (!this.godRaysPass)
+      return
+
+    const screen   = this.followTmp.copy(this.key.position).project(this.camera)
+    const onScreen =
+      screen.z < 1 &&
+      screen.x > -1.3 && screen.x < 1.3 &&
+      screen.y > -1.3 && screen.y < 1.3
+    const uniforms = this.godRaysPass.uniforms;
+    (uniforms.lightScreen.value as THREE.Vector2).set(screen.x * 0.5 + 0.5, screen.y * 0.5 + 0.5)
+    uniforms.weight.value = onScreen ? 0.5 : 0.0
+  }
+
+  /**
+   * Keep the orbit rig glued to the avatar. We translate the target *and* the
+   * camera by the same smoothed delta so the user's chosen orbit angle and zoom
+   * are preserved while the whole rig tracks the model across the floor.
+   */
+  private updateFollow (): void {
+    if (!this.followEnabled || !this.character.hasModel)
+      return
+
+    const p = this.character.position
+    this.followTmp.set(p.x, this.modelCenterY, p.z).sub(this.controls.target)
+      .multiplyScalar(0.12)
+    this.controls.target.add(this.followTmp)
+    this.camera.position.add(this.followTmp)
+  }
+
+  /**
+   * Build a furniture manager wired to this viewer's scene, camera, controls and
+   * canvas. Kept here so those internals stay private to the viewer.
+   */
+  createFurnitureManager (): FurnitureManager {
+    return new FurnitureManager({
+      scene:    this.scene,
+      camera:   this.camera,
+      controls: this.controls,
+      canvas:   this.canvas,
+      baseUrl:  import.meta.env.BASE_URL,
+      store:    new FurnitureStore(),
+    })
+  }
+
+  /** A grid-snapped wall drawing tool wired to this viewer's scene + input. */
+  createWallTool (): WallTool {
+    return new WallTool({
+      scene:    this.scene,
+      camera:   this.camera,
+      controls: this.controls,
+      canvas:   this.canvas,
+    })
+  }
+
+  /** The avatar controller, exposed for the furniture-interaction coordinator. */
+  getCharacter (): CharacterController {
+    return this.character
   }
 
   private applySize () {
@@ -829,91 +526,79 @@ export class VRMViewer {
 }
 
 /**
- * Convert a BVH clip into an AnimationClip targeting a VRM's normalized humanoid
- * bones. The SillyTavern BVH pack already names its joints with VRM humanoid
- * bone names and rests in a T-pose identical to the VRM normalized rig, so the
- * local rotations transfer directly; only the hips translation needs rescaling
- * to the target model's proportions (matching how createVRMAnimationClip does
- * it for .vrma files).
+ * Screen-space radial light-scattering ("god rays" / crepuscular rays). Marches
+ * a fixed number of samples from each pixel toward the light's screen position,
+ * accumulating only the bright parts of the frame (the sun flare, emissive lamp
+ * bulbs, bloom) so light appears to stream through the scene. Strong defaults.
  */
-/**
- * Pre-multiply every quaternion key in a flat [x,y,z,w,…] value array by `yaw`,
- * rotating the track's rotations in their parent frame. Used to re-face VRM0
- * hips so the body doesn't animate backwards.
- */
-function rotateQuaternionTrackValues (values: number[], yaw: THREE.Quaternion): void {
-  const q = new THREE.Quaternion()
-  for (let i = 0; i < values.length; i += 4) {
-    q.set(values[i], values[i + 1], values[i + 2], values[i + 3]).premultiply(yaw)
-    values[i]     = q.x
-    values[i + 1] = q.y
-    values[i + 2] = q.z
-    values[i + 3] = q.w
-  }
-}
-
-function retargetBVHToVRM (bvh: BVHResult, vrm: VRM): THREE.AnimationClip {
-  const humanoid      = vrm.humanoid
-  const rootBone      = bvh.skeleton.bones.find(bone => bone.name === 'hips') ?? bvh.skeleton.bones[0]
-  const restHipsY     = rootBone?.position.y || 1
-  const humanoidHipsY = humanoid.normalizedRestPose.hips?.position?.[1] ?? restHipsY
-  const hipScale      = humanoidHipsY / restHipsY
-
-  // VRM 0.0 rigs natively face -Z, so VRMUtils.rotateVRM0 rotates vrm.scene by π
-  // to make them face +Z like VRM 1.0. The BVH pack's hips track is authored in
-  // the canonical +Z-facing humanoid space, so composing it with that scene
-  // rotation would face the whole body backwards. Counter-rotate the hips track
-  // by π for VRM0 so the net world facing matches VRM1 (the steering logic keys
-  // off the same baseYaw = π, so this cancels out cleanly for movement too).
-  const isVRM0  = vrm.meta?.metaVersion === '0'
-  const hipsYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
-
-  const tracks: THREE.KeyframeTrack[] = []
-
-  for (const track of bvh.clip.tracks) {
-    const dot      = track.name.lastIndexOf('.')
-    const boneName = track.name.slice(0, dot)
-    const property = track.name.slice(dot + 1)
-    const node     = humanoid.getNormalizedBoneNode(boneName as VRMHumanBoneName)
-    if (!node)
-      continue
-
-    if (property === 'quaternion') {
-      const values = Array.from(track.values)
-      if (isVRM0 && boneName === 'hips')
-        rotateQuaternionTrackValues(values, hipsYaw)
-      tracks.push(new THREE.QuaternionKeyframeTrack(
-        `${node.name}.quaternion`,
-        Array.from(track.times),
-        values,
-      ))
+const GodRaysShader = {
+  name:     'GodRaysShader',
+  uniforms: {
+    tDiffuse:    { value: null as THREE.Texture | null },
+    lightScreen: { value: new THREE.Vector2(0.5, 0.7) },
+    exposure:    { value: 0.5 },
+    decay:       { value: 0.95 },
+    density:     { value: 0.92 },
+    weight:      { value: 0.5 },
+  },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
     }
-    else if (property === 'position' && boneName === 'hips')
-      tracks.push(new THREE.VectorKeyframeTrack(
-        `${node.name}.position`,
-        Array.from(track.times),
-        Array.from(track.values, value => value * hipScale),
-      ))
-  }
+  `,
+  fragmentShader: /* glsl */`
+    #define SAMPLES 64
+    varying vec2 vUv;
+    uniform sampler2D tDiffuse;
+    uniform vec2 lightScreen;
+    uniform float exposure;
+    uniform float decay;
+    uniform float density;
+    uniform float weight;
 
-  return new THREE.AnimationClip(bvh.clip.name || 'bvh', bvh.clip.duration, tracks)
+    void main() {
+      vec4 base = texture2D( tDiffuse, vUv );
+      vec2 texCoord = vUv;
+      vec2 delta = ( vUv - lightScreen ) * density / float( SAMPLES );
+      float illuminationDecay = 1.0;
+      vec3 rays = vec3( 0.0 );
+
+      for ( int i = 0; i < SAMPLES; i++ ) {
+        texCoord -= delta;
+        vec3 sampleColor = texture2D( tDiffuse, texCoord ).rgb;
+        float lum = dot( sampleColor, vec3( 0.299, 0.587, 0.114 ) );
+        sampleColor *= smoothstep( 0.55, 1.0, lum );
+        rays += sampleColor * illuminationDecay * weight;
+        illuminationDecay *= decay;
+      }
+
+      gl_FragColor = vec4( base.rgb + rays * exposure, base.a );
+    }
+  `,
 }
 
 /**
- * Zero the horizontal (X/Z) component of a clip's hips translation so the legs
- * cycle in place while the model's *root* is driven programmatically (used for
- * walk-to-tapped-point). The vertical bob is preserved.
+ * Build a soft radial-gradient sprite for lens-flare elements: an opaque (or
+ * hollow, for ghosts) warm core fading to transparent. Generated on a canvas so
+ * no texture assets need shipping.
  */
-function stripHorizontalRootMotion (clip: THREE.AnimationClip, vrm: VRM): void {
-  const hipsName = vrm.humanoid.getNormalizedBoneNode('hips')?.name
-  if (!hipsName)
-    return
+function makeFlareTexture (size: number, hollow: number, core: string): THREE.CanvasTexture {
+  const canvas  = document.createElement('canvas')
+  canvas.width  = size
+  canvas.height = size
 
-  const track = clip.tracks.find(candidate => candidate.name === `${hipsName}.position`)
-  if (!track)
-    return
-  for (let i = 0; i < track.values.length; i += 3) {
-    track.values[i]     = 0 // X
-    track.values[i + 2] = 0 // Z
-  }
+  const ctx      = canvas.getContext('2d')!
+  const half     = size / 2
+  const gradient = ctx.createRadialGradient(half, half, size * hollow, half, half, half)
+  gradient.addColorStop(0, hollow > 0 ? 'rgba(255,255,255,0)' : core)
+  gradient.addColorStop(hollow > 0 ? 0.5 : 0.1, core)
+  gradient.addColorStop(1, 'rgba(255,255,255,0)')
+  ctx.fillStyle = gradient
+  ctx.fillRect(0, 0, size, size)
+
+  const texture      = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  return texture
 }

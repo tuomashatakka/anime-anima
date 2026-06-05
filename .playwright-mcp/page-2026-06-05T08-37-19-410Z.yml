@@ -1,0 +1,28 @@
+- generic [ref=e2]:
+  - banner [ref=e4]:
+    - generic [ref=e5]: anime·anima
+    - generic [ref=e6]:
+      - button "Model …" [ref=e7] [cursor=pointer]:
+        - img [ref=e9]
+        - generic [ref=e12]: Model
+        - generic [ref=e13]: …
+      - button "Animation …" [ref=e14] [cursor=pointer]:
+        - img [ref=e16]
+        - generic [ref=e19]: Animation
+        - generic [ref=e20]: …
+      - button "Lighting Studio" [ref=e21] [cursor=pointer]:
+        - img [ref=e23]
+        - generic [ref=e26]: Lighting
+        - generic [ref=e27]: Studio
+      - button "Furniture Drag in" [ref=e28] [cursor=pointer]:
+        - img [ref=e30]
+        - generic [ref=e34]: Furniture
+        - generic [ref=e35]: Drag in
+      - button "Walls Off" [ref=e36] [cursor=pointer]:
+        - img [ref=e38]
+        - generic [ref=e41]: Walls
+        - generic [ref=e42]: "Off"
+      - button "Settings" [ref=e43] [cursor=pointer]:
+        - img [ref=e45]
+  - generic: Loading…
+  - generic [ref=e48]: Drag to orbit · tap the ground to move · drag furniture in, then grab the handles to move & rotate

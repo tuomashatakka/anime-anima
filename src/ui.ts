@@ -1,6 +1,19 @@
 import type { AnimationEntry, ModelEntry } from './types'
 import { LIGHTING_PRESETS } from './viewer'
 import type { LightingPreset } from './viewer'
+import { FURNITURE_CATALOG } from './furniture-catalog'
+import type { FurnitureItem } from './furniture-catalog'
+import { ThumbnailRenderer } from './furniture-thumbnails'
+
+
+/** Shared, lazily-created off-screen renderer for furniture palette previews. */
+let thumbnailRenderer: ThumbnailRenderer | null = null
+function furnitureThumbnailUrl (item: FurnitureItem): Promise<string | null> {
+  thumbnailRenderer ??= new ThumbnailRenderer()
+
+  const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+  return thumbnailRenderer.render(`${base}/furniture/${item.file}`, item.scale)
+}
 
 
 interface PopoverItem {
@@ -222,6 +235,92 @@ export class Toolbar {
   }
 }
 
+/**
+ * The furniture toolbar button + a grid popover of placeable pieces. Pressing a
+ * tile starts a drag-and-drop placement: `onPlace` is fired on pointerdown and
+ * the panel closes immediately so the live ghost preview is visible while the
+ * user drags onto the floor (works with mouse, pen and touch).
+ */
+export class FurniturePanel {
+  private element: HTMLDivElement | null = null
+
+  constructor (
+    private readonly button: HTMLButtonElement,
+    private readonly onPlace: (item: FurnitureItem) => void,
+  ) {
+    this.button.addEventListener('click', event => {
+      event.stopPropagation()
+      if (this.element)
+        this.close()
+      else
+        this.open()
+    })
+  }
+
+  private open () {
+    this.button.setAttribute('aria-expanded', 'true')
+
+    const popover     = document.createElement('div')
+    popover.className = 'popover furniture-popover'
+
+    const rect         = this.button.getBoundingClientRect()
+    popover.style.left = `${Math.max(12, Math.min(rect.left, window.innerWidth - 320))}px`
+
+    const grid     = document.createElement('div')
+    grid.className = 'furniture-grid'
+
+    for (const item of FURNITURE_CATALOG) {
+      const tile     = document.createElement('button')
+      tile.className = 'furniture-tile'
+
+      const thumb     = document.createElement('span')
+      thumb.className = 'furniture-thumb'
+
+      const name       = document.createElement('span')
+      name.className   = 'furniture-name'
+      name.textContent = item.name
+      tile.append(thumb, name)
+
+      // Render the real model preview lazily; cached after the first open.
+      void furnitureThumbnailUrl(item).then(dataUrl => {
+        if (dataUrl)
+          thumb.style.backgroundImage = `url(${dataUrl})`
+      })
+
+      // pointerdown (not click) so the placement drag begins on press.
+      tile.addEventListener('pointerdown', event => {
+        event.preventDefault()
+        event.stopPropagation()
+        this.close()
+        this.onPlace(item)
+      })
+      grid.appendChild(tile)
+    }
+
+    popover.appendChild(grid)
+    popover.addEventListener('click', event => event.stopPropagation())
+    document.getElementById('app')!.appendChild(popover)
+    this.element = popover
+
+    document.addEventListener('click', this.onDocumentClick)
+    document.addEventListener('keydown', this.onKeydown)
+  }
+
+  private close () {
+    this.element?.remove()
+    this.element = null
+    this.button.setAttribute('aria-expanded', 'false')
+    document.removeEventListener('click', this.onDocumentClick)
+    document.removeEventListener('keydown', this.onKeydown)
+  }
+
+  private readonly onDocumentClick = () => this.close()
+  private readonly onKeydown = (event: KeyboardEvent) => {
+    if (event.key === 'Escape')
+      this.close()
+  }
+}
+
 export interface SettingsState {
   fps:        boolean
   post:       boolean
@@ -239,7 +338,7 @@ const RESOLUTION_OPTIONS = [ 0.2, 0.33, 0.5, 0.67, 1 ]
 /** Modal settings dialog opened from the toolbar's gear button. */
 export class SettingsDialog {
   private readonly overlay: HTMLDivElement
-  private readonly state:   SettingsState = { fps: false, post: false, resolution: 1 }
+  private readonly state:   SettingsState = { fps: false, post: true, resolution: 0.67 }
 
   constructor (private readonly callbacks: SettingsCallbacks) {
     this.overlay           = document.createElement('div')
