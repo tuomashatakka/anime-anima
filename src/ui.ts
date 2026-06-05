@@ -5,6 +5,8 @@ import { FURNITURE_CATALOG } from './furniture-catalog'
 import type { FurnitureItem } from './furniture-catalog'
 import { ThumbnailRenderer } from './furniture-thumbnails'
 import { loadJSON, saveJSON } from './storage'
+import { DEFAULT_GRADE } from './grade'
+import type { ColorGrade } from './grade'
 
 
 /** Shared, lazily-created off-screen renderer for furniture palette previews. */
@@ -183,7 +185,7 @@ export class Toolbar {
       id => callbacks.onLightingPick(id as LightingPreset),
     )
     this.lightingPopover.setItems(LIGHTING_PRESETS.map(p => ({ id: p.id, label: p.label })))
-    this.lightingPopover.setActive('studio', 'Studio')
+    this.lightingPopover.setActive('dramatic', 'Dramatic')
 
     this.modelPopover = new Popover(
       document.getElementById('btn-models') as HTMLButtonElement,
@@ -326,18 +328,29 @@ export interface SettingsState {
   fps:        boolean
   post:       boolean
   resolution: number
+  grade:      ColorGrade
 }
 
 export interface SettingsCallbacks {
   onFps:        (on: boolean) => void
   onPost:       (on: boolean) => void
   onResolution: (scale: number) => void
+  onGrade:      (grade: ColorGrade) => void
 }
 
 const RESOLUTION_OPTIONS = [ 0.2, 0.33, 0.5, 0.67, 1 ]
 
+interface GradeControl { key: keyof ColorGrade, label: string, min: number, max: number }
+
+const GRADE_CONTROLS: GradeControl[] = [
+  { key: 'brightness', label: 'Brightness', min: 0.3, max: 1.6 },
+  { key: 'contrast', label: 'Contrast', min: 0.5, max: 2.0 },
+  { key: 'gamma', label: 'Gamma', min: 0.5, max: 2.2 },
+  { key: 'saturation', label: 'Saturation', min: 0.0, max: 2.0 },
+]
+
 /** Defaults applied the first time, before anything is persisted. */
-const DEFAULT_SETTINGS: SettingsState = { fps: false, post: true, resolution: 0.67 }
+const DEFAULT_SETTINGS: SettingsState = { fps: false, post: true, resolution: 0.67, grade: { ...DEFAULT_GRADE }}
 
 /** Modal settings dialog opened from the toolbar's gear button. */
 export class SettingsDialog {
@@ -363,6 +376,7 @@ export class SettingsDialog {
     this.callbacks.onFps(this.state.fps)
     this.callbacks.onPost(this.state.post)
     this.callbacks.onResolution(this.state.resolution)
+    this.callbacks.onGrade(this.state.grade)
   }
 
   private persist (): void {
@@ -386,6 +400,8 @@ export class SettingsDialog {
       this.persist()
     }))
     panel.appendChild(this.resolutionRow())
+    for (const control of GRADE_CONTROLS)
+      panel.appendChild(this.sliderRow(control))
 
     const close       = document.createElement('button')
     close.className   = 'dialog-close'
@@ -406,6 +422,38 @@ export class SettingsDialog {
     input.checked   = initial
     input.addEventListener('change', () => onChange(input.checked))
     row.appendChild(input)
+    return row
+  }
+
+  private sliderRow (control: GradeControl): HTMLElement {
+    const row     = document.createElement('div')
+    row.className = 'dialog-row'
+    row.innerHTML = `<span>${control.label}</span>`
+
+    const wrap     = document.createElement('div')
+    wrap.className = 'slider-wrap'
+
+    const input     = document.createElement('input')
+    input.type      = 'range'
+    input.className = 'slider'
+    input.min       = String(control.min)
+    input.max       = String(control.max)
+    input.step      = '0.01'
+    input.value     = String(this.state.grade[control.key])
+
+    const value       = document.createElement('span')
+    value.className   = 'slider-value'
+    value.textContent = this.state.grade[control.key].toFixed(2)
+
+    input.addEventListener('input', () => {
+      const v                       = parseFloat(input.value)
+      this.state.grade[control.key] = v
+      value.textContent             = v.toFixed(2)
+      this.callbacks.onGrade(this.state.grade)
+      this.persist()
+    })
+    wrap.append(input, value)
+    row.appendChild(wrap)
     return row
   }
 

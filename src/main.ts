@@ -34,6 +34,7 @@ async function main () {
     onFps:        on => viewer.setFpsVisible(on),
     onPost:       on => viewer.setPostProcessing(on),
     onResolution: scale => viewer.setResolutionScale(scale),
+    onGrade:      grade => viewer.setColorGrade(grade),
   })
 
   // Resolution / post-processing defaults (0.67×, post on) are applied by the

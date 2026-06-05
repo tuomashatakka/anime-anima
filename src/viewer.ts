@@ -14,10 +14,13 @@ import { FurnitureManager } from './furniture'
 import { FurnitureStore } from './furniture-store'
 import { WallTool } from './walls'
 import { createCinematicLUT } from './lut'
+import { AshParticles } from './ash'
+import { ColorGradeShader, DEFAULT_GRADE } from './grade'
+import type { ColorGrade } from './grade'
 import type { AnimationEntry, ModelEntry } from './types'
 
 
-export type LightingPreset = 'studio' | 'soft' | 'neon' | 'sunset'
+export type LightingPreset = 'dramatic' | 'studio' | 'soft' | 'neon' | 'sunset'
 
 interface LightingConfig {
   background: number
@@ -30,9 +33,13 @@ interface LightingConfig {
 
   /** Optional narrow theatrical spotlight: colour, intensity, position, cone angle (rad). */
   spot?: [number, number, [number, number, number], number]
+
+  /** Optional pair of visible cone-shaped beams converging on the stage: colour, intensity. */
+  beams?: [number, number]
 }
 
 export const LIGHTING_PRESETS: { id: LightingPreset, label: string }[] = [
+  { id: 'dramatic', label: 'Dramatic' },
   { id: 'studio', label: 'Studio' },
   { id: 'soft', label: 'Soft' },
   { id: 'neon', label: 'Neon Night' },
@@ -40,44 +47,55 @@ export const LIGHTING_PRESETS: { id: LightingPreset, label: string }[] = [
 ]
 
 const LIGHTING_CONFIG: Record<LightingPreset, LightingConfig> = {
+  // Mostly black, with two crossing volumetric beams pooling on the stage.
+  dramatic: {
+    background: 0x040507,
+    exposure:   1.18,
+    fog:        [ 9, 30 ],
+    hemi:       [ 0x222d40, 0x040507, 0.16 ],
+    key:        [ 0xfff0d8, 0.7, [ 5, 9, 5 ]],
+    rim:        [ 0x3a5cff, 1.4, [ -6, 5, -6 ]],
+    accent:     [ 0xffffff, 0, [ -5, 4, 4 ]],
+    beams:      [ 0xfff1de, 160 ],
+  },
   studio: {
     background: 0x0b0e16,
-    exposure:   1.28,
+    exposure:   1.18,
     fog:        [ 8, 30 ],
-    hemi:       [ 0x6f7ea8, 0x10131c, 0.7 ],
-    key:        [ 0xffe6c4, 3.3, [ 5, 8, 4 ]],
-    rim:        [ 0x4f7bff, 2.9, [ -6, 5, -6 ]],
-    accent:     [ 0xff2e7e, 42, [ -5, 4, 4 ]],
-    spot:       [ 0xfff2dc, 70, [ 1.6, 6.5, 2.6 ], Math.PI / 13 ],
+    hemi:       [ 0x6f7ea8, 0x10131c, 0.62 ],
+    key:        [ 0xffe6c4, 3.1, [ 5, 8, 4 ]],
+    rim:        [ 0x4f7bff, 2.7, [ -6, 5, -6 ]],
+    accent:     [ 0xff2e7e, 38, [ -5, 4, 4 ]],
+    spot:       [ 0xfff2dc, 65, [ 1.6, 6.5, 2.6 ], Math.PI / 13 ],
   },
   soft: {
     background: 0x262b35,
-    exposure:   1.32,
+    exposure:   1.22,
     fog:        [ 12, 36 ],
-    hemi:       [ 0xc8d2ec, 0x4a505e, 1.25 ],
-    key:        [ 0xfff4e8, 2.9, [ 4, 7, 5 ]],
-    rim:        [ 0xbfd0ff, 1.3, [ -4, 4, -5 ]],
+    hemi:       [ 0xc8d2ec, 0x4a505e, 1.15 ],
+    key:        [ 0xfff4e8, 2.7, [ 4, 7, 5 ]],
+    rim:        [ 0xbfd0ff, 1.2, [ -4, 4, -5 ]],
     accent:     [ 0xffffff, 0, [ -5, 4, 4 ]],
   },
   neon: {
     background: 0x0a0814,
-    exposure:   1.5,
+    exposure:   1.38,
     fog:        [ 6, 24 ],
-    hemi:       [ 0x303060, 0x0a0814, 0.5 ],
-    key:        [ 0x00e5ff, 3.0, [ 5, 6, 4 ]],
-    rim:        [ 0xff00aa, 3.3, [ -6, 5, -5 ]],
-    accent:     [ 0x9b5cff, 58, [ -4, 4, 5 ]],
-    spot:       [ 0x00e5ff, 110, [ -1.8, 6.5, 2.2 ], Math.PI / 16 ],
+    hemi:       [ 0x303060, 0x0a0814, 0.45 ],
+    key:        [ 0x00e5ff, 2.8, [ 5, 6, 4 ]],
+    rim:        [ 0xff00aa, 3.1, [ -6, 5, -5 ]],
+    accent:     [ 0x9b5cff, 54, [ -4, 4, 5 ]],
+    spot:       [ 0x00e5ff, 105, [ -1.8, 6.5, 2.2 ], Math.PI / 16 ],
   },
   sunset: {
     background: 0x1d1018,
-    exposure:   1.5,
+    exposure:   1.4,
     fog:        [ 9, 32 ],
-    hemi:       [ 0x8a647e, 0x241016, 0.9 ],
-    key:        [ 0xffb066, 4.0, [ 6, 5, 3 ]],
-    rim:        [ 0xff5e8a, 2.3, [ -5, 4, -6 ]],
-    accent:     [ 0x4060ff, 20, [ -5, 5, 5 ]],
-    spot:       [ 0xffcaa0, 80, [ 2.2, 6, 2.4 ], Math.PI / 13 ],
+    hemi:       [ 0x8a647e, 0x241016, 0.82 ],
+    key:        [ 0xffb066, 3.8, [ 6, 5, 3 ]],
+    rim:        [ 0xff5e8a, 2.2, [ -5, 4, -6 ]],
+    accent:     [ 0x4060ff, 19, [ -5, 5, 5 ]],
+    spot:       [ 0xffcaa0, 75, [ 2.2, 6, 2.4 ], Math.PI / 13 ],
   },
 }
 
@@ -101,10 +119,15 @@ export class VRMViewer {
   private rim!:    THREE.DirectionalLight
   private accent!: THREE.SpotLight
   private spot!:   THREE.SpotLight
+  private beams!:  THREE.SpotLight[]
+  private cones!:  THREE.Mesh[]
+  private ash:     AshParticles | null = null
 
-  private composer:    EffectComposer | null = null
-  private bloomPass:   UnrealBloomPass | null = null
-  private godRaysPass: ShaderPass | null = null
+  private composer:       EffectComposer | null = null
+  private bloomPass:      UnrealBloomPass | null = null
+  private godRaysPass:    ShaderPass | null = null
+  private gradePass:      ShaderPass | null = null
+  private readonly grade: ColorGrade = { ...DEFAULT_GRADE }
   private postEnabled = false
   private resolutionScale = 1
 
@@ -199,8 +222,29 @@ export class VRMViewer {
     this.spot.target.position.set(0, 0.9, 0)
     this.scene.add(this.spot, this.spot.target)
 
+    // Two crossing beams + their visible volumetric cones (the "valokiilat"),
+    // pooling on the stage centre — toggled on by presets that set `beams`.
+    const beamPositions: [number, number, number][] = [[ -3.6, 7.6, 3.4 ], [ 3.6, 7.6, 3.4 ]]
+    const target                                    = new THREE.Vector3(0, 0.55, 0)
+    this.beams                                      = []
+    this.cones                                      = []
+    for (const pos of beamPositions) {
+      const beam      = new THREE.SpotLight(0xffffff, 0, 26, Math.PI / 12, 0.45, 1.3)
+      beam.position.set(...pos)
+      beam.target.position.copy(target)
+      beam.castShadow = true
+      beam.shadow.mapSize.set(1024, 1024)
+      this.scene.add(beam, beam.target)
+      this.beams.push(beam)
+
+      const cone   = makeLightCone(new THREE.Vector3(...pos), target)
+      cone.visible = false
+      this.scene.add(cone)
+      this.cones.push(cone)
+    }
+
     this.attachLensflare()
-    this.setLighting('studio')
+    this.setLighting('dramatic')
   }
 
   /**
@@ -209,16 +253,23 @@ export class VRMViewer {
    * when the light is actually visible — pairs with the god-rays pass.
    */
   private attachLensflare (): void {
-    const main  = makeFlareTexture(256, 0.0, 'rgba(255,238,200,1)')
-    const ghost = makeFlareTexture(128, 0.25, 'rgba(160,200,255,0.9)')
+    const main = makeFlareMain(512)
+    const ring = makeFlareRing(256)
+    const hex  = makeFlareGhost(128)
 
     const flare = new Lensflare()
-    flare.addElement(new LensflareElement(main, 700, 0, this.key.color))
-    flare.addElement(new LensflareElement(ghost, 90, 0.55))
-    flare.addElement(new LensflareElement(ghost, 140, 0.65))
-    flare.addElement(new LensflareElement(ghost, 70, 0.8))
-    flare.addElement(new LensflareElement(ghost, 110, 0.95))
-    flare.addElement(new LensflareElement(main, 60, 1.0))
+    // Bright burst + halo ring at the light itself.
+    flare.addElement(new LensflareElement(main, 360, 0, this.key.color))
+    flare.addElement(new LensflareElement(ring, 130, 0))
+    // Faint, varied hexagonal aperture ghosts spread along the optical axis,
+    // with subtle chromatic shifts — the hallmark of a real lens flare.
+    flare.addElement(new LensflareElement(hex, 44, 0.22, new THREE.Color(0x6fb0ff)))
+    flare.addElement(new LensflareElement(hex, 30, 0.40, new THREE.Color(0xffd6a0)))
+    flare.addElement(new LensflareElement(hex, 66, 0.58, new THREE.Color(0x8fffe0)))
+    flare.addElement(new LensflareElement(hex, 24, 0.72, new THREE.Color(0xffffff)))
+    flare.addElement(new LensflareElement(hex, 84, 0.92, new THREE.Color(0xff95c4)))
+    flare.addElement(new LensflareElement(hex, 40, 1.18, new THREE.Color(0xa593ff)))
+    flare.addElement(new LensflareElement(ring, 120, 1.45, new THREE.Color(0x9fc0ff)))
     this.key.add(flare)
   }
 
@@ -247,6 +298,21 @@ export class VRMViewer {
     }
     else
       this.spot.intensity = 0
+
+    // Visible crossing beams + their cone meshes.
+    for (let i = 0; i < this.beams.length; i++) {
+      const beam = this.beams[i]
+      const cone = this.cones[i]
+      if (c.beams) {
+        beam.color.set(c.beams[0]); beam.intensity = c.beams[1]
+        cone.visible                               = true;
+        ((cone.material as THREE.ShaderMaterial).uniforms.uColor.value as THREE.Color).set(c.beams[0])
+      }
+      else {
+        beam.intensity = 0
+        cone.visible   = false
+      }
+    }
   }
 
   private buildEnvironment () {
@@ -280,6 +346,10 @@ export class VRMViewer {
     (grid.material as THREE.Material).opacity     = 0.18
     grid.position.y                               = 0.004
     this.scene.add(grid)
+
+    // Ash drifting down, thick at the edges, clear in the middle.
+    this.ash = new AshParticles()
+    this.scene.add(this.ash.points)
   }
 
   // #endregion
@@ -371,6 +441,7 @@ export class VRMViewer {
     const delta = this.clock.getDelta()
 
     this.character.update(delta)
+    this.ash?.update(this.clock.getElapsedTime())
     this.updateFollow()
     this.controls.update()
 
@@ -438,10 +509,34 @@ export class VRMViewer {
     const lut       = new LUTPass({ lut: createCinematicLUT(33), intensity: 0.9 })
     composer.addPass(lut)
 
+    // User-adjustable brightness / contrast / gamma / saturation.
+    const grade    = new ShaderPass(ColorGradeShader)
+    composer.addPass(grade)
+    this.gradePass = grade
+    this.applyGrade()
+
     composer.addPass(new OutputPass())
     this.composer    = composer
     this.bloomPass   = bloom
     this.godRaysPass = godRays
+  }
+
+  /** Push the current colour-grade values into the grade pass uniforms. */
+  private applyGrade (): void {
+    if (!this.gradePass)
+      return
+
+    const u            = this.gradePass.uniforms
+    u.brightness.value = this.grade.brightness
+    u.contrast.value   = this.grade.contrast
+    u.gamma.value      = this.grade.gamma
+    u.saturation.value = this.grade.saturation
+  }
+
+  /** Update one or more colour-grade adjustments (from the settings dialog). */
+  setColorGrade (grade: Partial<ColorGrade>): void {
+    Object.assign(this.grade, grade)
+    this.applyGrade()
   }
 
   /**
@@ -601,21 +696,145 @@ const GodRaysShader = {
  * hollow, for ghosts) warm core fading to transparent. Generated on a canvas so
  * no texture assets need shipping.
  */
-function makeFlareTexture (size: number, hollow: number, core: string): THREE.CanvasTexture {
+type FlareCanvasReturnType = { canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, half: number }
+
+function flareCanvas (size: number): FlareCanvasReturnType {
   const canvas  = document.createElement('canvas')
   canvas.width  = size
   canvas.height = size
+  return { canvas, ctx: canvas.getContext('2d')!, half: size / 2 }
+}
 
-  const ctx      = canvas.getContext('2d')!
-  const half     = size / 2
-  const gradient = ctx.createRadialGradient(half, half, size * hollow, half, half, half)
-  gradient.addColorStop(0, hollow > 0 ? 'rgba(255,255,255,0)' : core)
-  gradient.addColorStop(hollow > 0 ? 0.5 : 0.1, core)
-  gradient.addColorStop(1, 'rgba(255,255,255,0)')
-  ctx.fillStyle = gradient
-  ctx.fillRect(0, 0, size, size)
-
+function flareTexture (canvas: HTMLCanvasElement): THREE.CanvasTexture {
   const texture      = new THREE.CanvasTexture(canvas)
   texture.colorSpace = THREE.SRGBColorSpace
   return texture
+}
+
+/** The main burst: a tight white core, warm halo, faint starburst + anamorphic streak. */
+function makeFlareMain (size: number): THREE.CanvasTexture {
+  const { canvas, ctx, half } = flareCanvas(size)
+  const glow                  = ctx.createRadialGradient(half, half, 0, half, half, half)
+  glow.addColorStop(0, 'rgba(255,255,255,1)')
+  glow.addColorStop(0.05, 'rgba(255,249,233,0.95)')
+  glow.addColorStop(0.16, 'rgba(255,228,188,0.30)')
+  glow.addColorStop(0.45, 'rgba(255,216,170,0.05)')
+  glow.addColorStop(1, 'rgba(255,255,255,0)')
+  ctx.fillStyle = glow
+  ctx.fillRect(0, 0, size, size)
+
+  ctx.globalCompositeOperation = 'lighter'
+  for (let i = 0; i < 12; i++) {
+    const angle     = i / 12 * Math.PI * 2
+    ctx.strokeStyle = `rgba(255,246,226,${i % 3 === 0 ? 0.3 : 0.14})`
+    ctx.lineWidth   = i % 3 === 0 ? 2 : 1
+    ctx.beginPath()
+    ctx.moveTo(half, half)
+    ctx.lineTo(half + Math.cos(angle) * half * 0.96, half + Math.sin(angle) * half * 0.96)
+    ctx.stroke()
+  }
+
+  const streak = ctx.createLinearGradient(0, half, size, half)
+  streak.addColorStop(0, 'rgba(150,190,255,0)')
+  streak.addColorStop(0.5, 'rgba(170,205,255,0.5)')
+  streak.addColorStop(1, 'rgba(150,190,255,0)')
+  ctx.fillStyle = streak
+  ctx.fillRect(0, half - size * 0.012, size, size * 0.024)
+
+  return flareTexture(canvas)
+}
+
+/** A thin halo ring (anamorphic / aperture diffraction halo). */
+function makeFlareRing (size: number): THREE.CanvasTexture {
+  const { canvas, ctx, half } = flareCanvas(size)
+  const ring                  = ctx.createRadialGradient(half, half, half * 0.62, half, half, half * 0.96)
+  ring.addColorStop(0, 'rgba(255,255,255,0)')
+  ring.addColorStop(0.5, 'rgba(190,215,255,0.5)')
+  ring.addColorStop(1, 'rgba(255,255,255,0)')
+  ctx.fillStyle = ring
+  ctx.fillRect(0, 0, size, size)
+  return flareTexture(canvas)
+}
+
+/** A soft hexagonal aperture ghost. */
+function makeFlareGhost (size: number): THREE.CanvasTexture {
+  const { canvas, ctx, half } = flareCanvas(size)
+  const r                     = half * 0.72
+  ctx.beginPath()
+  for (let i = 0; i < 6; i++) {
+    const angle = Math.PI / 6 + i * Math.PI / 3
+    const x     = half + Math.cos(angle) * r
+    const y     = half + Math.sin(angle) * r
+    if (i === 0)
+      ctx.moveTo(x, y)
+    else
+      ctx.lineTo(x, y)
+  }
+  ctx.closePath()
+  ctx.clip()
+
+  const fill = ctx.createRadialGradient(half, half, 0, half, half, r)
+  fill.addColorStop(0, 'rgba(255,255,255,0.5)')
+  fill.addColorStop(0.7, 'rgba(255,255,255,0.16)')
+  fill.addColorStop(1, 'rgba(255,255,255,0)')
+  ctx.fillStyle = fill
+  ctx.fillRect(0, 0, size, size)
+  return flareTexture(canvas)
+}
+
+/**
+ * A visible volumetric light cone (additive) from `from` to `to`: bright near
+ * the apex, soft silhouette via a view-angle rim term. Double-sided so the
+ * overlapping front/back faces read as a soft shaft of light.
+ */
+function makeLightCone (from: THREE.Vector3, to: THREE.Vector3): THREE.Mesh {
+  const height   = from.distanceTo(to)
+  const radius   = height * 0.16
+  const geometry = new THREE.ConeGeometry(radius, height, 40, 1, true)
+  geometry.translate(0, -height / 2, 0)
+
+  const material = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite:  false,
+    blending:    THREE.AdditiveBlending,
+    side:        THREE.DoubleSide,
+    uniforms:    {
+      uColor:  { value: new THREE.Color(0xffffff) },
+      uHeight: { value: height },
+    },
+    vertexShader: /* glsl */`
+      varying float vT;
+      varying vec3 vNormalV;
+      varying vec3 vViewDir;
+      uniform float uHeight;
+      void main() {
+        vT = -position.y / uHeight;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vNormalV = normalize(normalMatrix * normal);
+        vViewDir = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: /* glsl */`
+      varying float vT;
+      varying vec3 vNormalV;
+      varying vec3 vViewDir;
+      uniform vec3 uColor;
+      void main() {
+        float rim = pow(1.0 - abs(dot(normalize(vNormalV), normalize(vViewDir))), 1.5);
+        float vertical = pow(1.0 - clamp(vT, 0.0, 1.0), 1.15);
+        // Additive: keep alpha = 1 and put all brightness in rgb (avoids an a^2 falloff).
+        float a = vertical * (0.16 + 0.6 * rim);
+        gl_FragColor = vec4(uColor * a * 1.7, 1.0);
+      }
+    `,
+  })
+
+  const mesh = new THREE.Mesh(geometry, material)
+  mesh.position.copy(from)
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), to.clone().sub(from)
+    .normalize())
+  mesh.renderOrder   = 3
+  mesh.frustumCulled = false
+  return mesh
 }

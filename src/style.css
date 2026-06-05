@@ -549,6 +549,24 @@ body {
   accent-color: var(--color-accent);
 }
 
+.slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+.slider {
+  width: 150px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+.slider-value {
+  width: 34px;
+  text-align: right;
+  color: var(--color-text-dim);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
 .seg {
   --seg-gap: var(--spacing-xs);
 
