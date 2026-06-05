@@ -1,4 +1,6 @@
 import type { AnimationEntry, ModelEntry } from './types'
+import { LIGHTING_PRESETS } from './viewer'
+import type { LightingPreset } from './viewer'
 
 
 interface PopoverItem {
@@ -138,15 +140,25 @@ export interface ToolbarCallbacks {
   onModelPick:      (entry: ModelEntry) => void
   onAnimationPick:  (entry: AnimationEntry) => void
   onAnimationClear: () => void
+  onLightingPick:   (preset: LightingPreset) => void
 }
 
 export class Toolbar {
   private readonly modelPopover:     Popover
   private readonly animationPopover: Popover
+  private readonly lightingPopover:  Popover
   private models:                    ModelEntry[] = []
   private animations:                AnimationEntry[] = []
 
   constructor (callbacks: ToolbarCallbacks) {
+    this.lightingPopover = new Popover(
+      document.getElementById('btn-lighting') as HTMLButtonElement,
+      document.getElementById('current-lighting')!,
+      id => callbacks.onLightingPick(id as LightingPreset),
+    )
+    this.lightingPopover.setItems(LIGHTING_PRESETS.map(p => ({ id: p.id, label: p.label })))
+    this.lightingPopover.setActive('studio', 'Studio')
+
     this.modelPopover = new Popover(
       document.getElementById('btn-models') as HTMLButtonElement,
       document.getElementById('current-model')!,
@@ -195,5 +207,110 @@ export class Toolbar {
       this.animationPopover.setActive(entry.url, entry.name)
     else
       this.animationPopover.setActive(NONE_ID, 'Auto idle')
+  }
+}
+
+export interface SettingsState {
+  fps:        boolean
+  post:       boolean
+  resolution: number
+}
+
+export interface SettingsCallbacks {
+  onFps:        (on: boolean) => void
+  onPost:       (on: boolean) => void
+  onResolution: (scale: number) => void
+}
+
+const RESOLUTION_OPTIONS = [ 0.2, 0.33, 0.5, 0.67, 1 ]
+
+/** Modal settings dialog opened from the toolbar's gear button. */
+export class SettingsDialog {
+  private readonly overlay: HTMLDivElement
+  private readonly state:   SettingsState = { fps: false, post: false, resolution: 1 }
+
+  constructor (private readonly callbacks: SettingsCallbacks) {
+    this.overlay           = document.createElement('div')
+    this.overlay.className = 'dialog-overlay'
+    this.overlay.addEventListener('click', event => {
+      if (event.target === this.overlay)
+        this.close()
+    })
+    this.overlay.appendChild(this.buildPanel())
+    document.getElementById('app')!.appendChild(this.overlay)
+
+    document.getElementById('btn-settings')!.addEventListener('click', event => {
+      event.stopPropagation()
+      this.open()
+    })
+  }
+
+  private buildPanel (): HTMLElement {
+    const panel     = document.createElement('div')
+    panel.className = 'dialog'
+    panel.addEventListener('click', event => event.stopPropagation())
+    panel.innerHTML = '<header class="dialog-title">Settings</header>'
+
+    panel.appendChild(this.toggleRow('Display FPS', this.state.fps, on => {
+      this.state.fps = on
+      this.callbacks.onFps(on)
+    }))
+    panel.appendChild(this.toggleRow('Post-processing', this.state.post, on => {
+      this.state.post = on
+      this.callbacks.onPost(on)
+    }))
+    panel.appendChild(this.resolutionRow())
+
+    const close       = document.createElement('button')
+    close.className   = 'dialog-close'
+    close.textContent = 'Done'
+    close.addEventListener('click', () => this.close())
+    panel.appendChild(close)
+    return panel
+  }
+
+  private toggleRow (label: string, initial: boolean, onChange: (on: boolean) => void): HTMLElement {
+    const row     = document.createElement('label')
+    row.className = 'dialog-row'
+    row.innerHTML = `<span>${label}</span>`
+
+    const input     = document.createElement('input')
+    input.type      = 'checkbox'
+    input.className = 'switch'
+    input.checked   = initial
+    input.addEventListener('change', () => onChange(input.checked))
+    row.appendChild(input)
+    return row
+  }
+
+  private resolutionRow (): HTMLElement {
+    const row     = document.createElement('div')
+    row.className = 'dialog-row'
+    row.innerHTML = '<span>Resolution scale</span>'
+
+    const group     = document.createElement('div')
+    group.className = 'seg'
+    for (const value of RESOLUTION_OPTIONS) {
+      const button       = document.createElement('button')
+      button.textContent = `${value}×`
+      button.className   = value === this.state.resolution ? 'active' : ''
+      button.addEventListener('click', () => {
+        this.state.resolution = value
+        this.callbacks.onResolution(value)
+        for (const child of group.children)
+          child.classList.toggle('active', child === button)
+      })
+      group.appendChild(button)
+    }
+    row.appendChild(group)
+    return row
+  }
+
+  private open () {
+    this.overlay.classList.add('open')
+  }
+
+  private close () {
+    this.overlay.classList.remove('open')
   }
 }

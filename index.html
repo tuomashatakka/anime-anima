@@ -23,10 +23,19 @@
             <span class="label">Animation</span>
             <span id="current-animation" class="current">&hellip;</span>
           </button>
+          <button id="btn-lighting" class="toolbar-button" aria-haspopup="true" aria-expanded="false">
+            <span class="icon">&#128161;</span>
+            <span class="label">Lighting</span>
+            <span id="current-lighting" class="current">&hellip;</span>
+          </button>
+          <button id="btn-settings" class="toolbar-button icon-only" title="Settings">
+            <span class="icon">&#9881;</span>
+          </button>
         </div>
       </header>
 
-      <!-- popovers are injected by ui.ts -->
+      <!-- popovers + settings dialog are injected by ui.ts -->
+      <div id="fps" class="fps">– fps</div>
       <div id="loading" class="loading">Loading&hellip;</div>
       <div class="hint">Drag to orbit &middot; tap the ground to move (tap again to speed up)</div>
     </div>

@@ -3,6 +3,12 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { BVHLoader } from 'three/examples/jsm/loaders/BVHLoader.js'
 import { Reflector } from 'three/examples/jsm/objects/Reflector.js'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
+import { VignetteShader } from 'three/examples/jsm/shaders/VignetteShader.js'
 import { VRM, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
 import type { VRMHumanBoneName } from '@pixiv/three-vrm'
 import {
@@ -43,6 +49,64 @@ const GAIT_ESCALATION: Record<Locomotion, Locomotion> = { walk: 'jog', jog: 'run
 /** The shape of the three.js AnimationMixer "finished" event we care about. */
 type MixerFinishedEvent = { action: THREE.AnimationAction }
 
+export type LightingPreset = 'studio' | 'soft' | 'neon' | 'sunset'
+
+interface LightingConfig {
+  background: number
+  exposure:   number
+  fog:        [number, number]
+  hemi:       [number, number, number] // sky, ground, intensity
+  key:        [number, number, [number, number, number]] // colour, intensity, position
+  rim:        [number, number, [number, number, number]]
+  accent:     [number, number, [number, number, number]]
+}
+
+export const LIGHTING_PRESETS: { id: LightingPreset, label: string }[] = [
+  { id: 'studio', label: 'Studio' },
+  { id: 'soft', label: 'Soft' },
+  { id: 'neon', label: 'Neon Night' },
+  { id: 'sunset', label: 'Sunset' },
+]
+
+const LIGHTING_CONFIG: Record<LightingPreset, LightingConfig> = {
+  studio: {
+    background: 0x05060a,
+    exposure:   1.15,
+    fog:        [ 6, 26 ],
+    hemi:       [ 0x556080, 0x05060a, 0.35 ],
+    key:        [ 0xffe6c4, 3.2, [ 5, 8, 4 ]],
+    rim:        [ 0x3f6bff, 2.6, [ -6, 5, -6 ]],
+    accent:     [ 0xff2e7e, 40, [ -5, 4, 4 ]],
+  },
+  soft: {
+    background: 0x1a1d24,
+    exposure:   1.0,
+    fog:        [ 10, 32 ],
+    hemi:       [ 0xb8c4e0, 0x404654, 0.9 ],
+    key:        [ 0xfff4e8, 2.2, [ 4, 7, 5 ]],
+    rim:        [ 0xbfd0ff, 1.0, [ -4, 4, -5 ]],
+    accent:     [ 0xffffff, 0, [ -5, 4, 4 ]],
+  },
+  neon: {
+    background: 0x04030a,
+    exposure:   1.25,
+    fog:        [ 5, 22 ],
+    hemi:       [ 0x202040, 0x04030a, 0.2 ],
+    key:        [ 0x00e5ff, 2.6, [ 5, 6, 4 ]],
+    rim:        [ 0xff00aa, 3.0, [ -6, 5, -5 ]],
+    accent:     [ 0x9b5cff, 55, [ -4, 4, 5 ]],
+  },
+  sunset: {
+    background: 0x140a10,
+    exposure:   1.2,
+    fog:        [ 7, 28 ],
+    hemi:       [ 0x6a4a6a, 0x180c10, 0.5 ],
+    key:        [ 0xffb066, 3.4, [ 6, 5, 3 ]],
+    rim:        [ 0xff5e8a, 2.0, [ -5, 4, -6 ]],
+    accent:     [ 0x4060ff, 18, [ -5, 5, 5 ]],
+  },
+}
+
 /**
  * Owns the three.js scene and everything VRM-related: loading models, loading
  * animations (both .vrma and .bvh), crossfading between clips, click-to-move
@@ -63,6 +127,22 @@ export class VRMViewer {
   private readonly gltfLoader = new GLTFLoader()
   private readonly vrmaLoader = new GLTFLoader()
   private readonly bvhLoader = new BVHLoader()
+
+  // #region Rendering / lighting / settings
+  private hemi!:   THREE.HemisphereLight
+  private key!:    THREE.DirectionalLight
+  private rim!:    THREE.DirectionalLight
+  private accent!: THREE.SpotLight
+
+  private composer:   EffectComposer | null = null
+  private bloomPass:  UnrealBloomPass | null = null
+  private postEnabled = false
+  private resolutionScale = 1
+  private fpsVisible = false
+  private fpsElement: HTMLElement | null = document.getElementById('fps')
+  private fpsAccum = 0
+  private fpsFrames = 0
+  // #endregion
 
   private currentVRM:    VRM | null = null
   private mixer:         THREE.AnimationMixer | null = null
@@ -148,38 +228,50 @@ export class VRMViewer {
 
   // #region Environment
 
-  /** Dramatic three-point-ish stage lighting: warm key, cool rim, magenta kicker. */
+  /** Create the lights (a preset configures their colours / intensities). */
   private buildLighting () {
-    // Dim cool fill so the directional lights carry the drama.
-    const hemi = new THREE.HemisphereLight(0x556080, 0x05060a, 0.35)
-    this.scene.add(hemi)
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0x000000, 1)
+    this.scene.add(this.hemi)
 
-    // Warm key light from the front-right, the only shadow caster.
-    const key = new THREE.DirectionalLight(0xffe6c4, 3.2)
-    key.position.set(5, 8, 4)
-    key.castShadow = true
-    key.shadow.mapSize.set(2048, 2048)
-    key.shadow.camera.near   = 0.5
-    key.shadow.camera.far    = 30
-    key.shadow.camera.left   = -3.5
-    key.shadow.camera.right  = 3.5
-    key.shadow.camera.top    = 4
-    key.shadow.camera.bottom = -1
-    key.shadow.bias          = -0.0004
-    key.shadow.radius        = 3
-    this.scene.add(key)
+    this.key            = new THREE.DirectionalLight(0xffffff, 1)
+    this.key.castShadow = true
+    this.key.shadow.mapSize.set(2048, 2048)
+    this.key.shadow.camera.near   = 0.5
+    this.key.shadow.camera.far    = 30
+    this.key.shadow.camera.left   = -3.5
+    this.key.shadow.camera.right  = 3.5
+    this.key.shadow.camera.top    = 4
+    this.key.shadow.camera.bottom = -1
+    this.key.shadow.bias          = -0.0004
+    this.key.shadow.radius        = 3
+    this.scene.add(this.key)
 
-    // Cool back/rim light to carve the silhouette.
-    const rim = new THREE.DirectionalLight(0x3f6bff, 2.6)
-    rim.position.set(-6, 5, -6)
-    this.scene.add(rim)
+    this.rim = new THREE.DirectionalLight(0xffffff, 1)
+    this.scene.add(this.rim)
 
-    // Magenta accent kicker from the opposite side for a stage-lit feel.
-    const accent = new THREE.SpotLight(0xff2e7e, 40, 18, Math.PI / 5, 0.7, 1.5)
-    accent.position.set(-5, 4, 4)
-    accent.target.position.set(0, 1, 0)
-    this.scene.add(accent)
-    this.scene.add(accent.target)
+    this.accent = new THREE.SpotLight(0xffffff, 0, 18, Math.PI / 5, 0.7, 1.5)
+    this.accent.target.position.set(0, 1, 0)
+    this.scene.add(this.accent, this.accent.target)
+
+    this.setLighting('studio')
+  }
+
+  /** Apply a named lighting preset (background, fog, exposure and all lights). */
+  setLighting (preset: LightingPreset): void {
+    const c = LIGHTING_CONFIG[preset];
+    (this.scene.background as THREE.Color).set(c.background);
+    (this.scene.fog as THREE.Fog).color.set(c.background);
+    (this.scene.fog as THREE.Fog).near = c.fog[0];
+    (this.scene.fog as THREE.Fog).far  = c.fog[1]
+    this.renderer.toneMappingExposure  = c.exposure
+
+    this.hemi.color.set(c.hemi[0])
+    this.hemi.groundColor.set(c.hemi[1])
+    this.hemi.intensity = c.hemi[2]
+
+    this.key.color.set(c.key[0]); this.key.intensity          = c.key[1]; this.key.position.set(...c.key[2])
+    this.rim.color.set(c.rim[0]); this.rim.intensity          = c.rim[1]; this.rim.position.set(...c.rim[2])
+    this.accent.color.set(c.accent[0]); this.accent.intensity = c.accent[1]; this.accent.position.set(...c.accent[2])
   }
 
   private buildEnvironment () {
@@ -656,13 +748,83 @@ export class VRMViewer {
     this.mixer?.update(delta)
     this.currentVRM?.update(delta)
     this.controls.update()
-    this.renderer.render(this.scene, this.camera)
+
+    if (this.postEnabled && this.composer)
+      this.composer.render()
+    else
+      this.renderer.render(this.scene, this.camera)
+
+    this.updateFps(delta)
   }
+
+  // #region Settings / rendering controls
+
+  setResolutionScale (scale: number): void {
+    this.resolutionScale = scale
+    this.applySize()
+  }
+
+  setPostProcessing (enabled: boolean): void {
+    this.postEnabled = enabled
+    if (enabled && !this.composer)
+      this.buildComposer()
+    this.applySize()
+  }
+
+  setFpsVisible (visible: boolean): void {
+    this.fpsVisible = visible
+    this.fpsElement?.classList.toggle('visible', visible)
+  }
+
+  private buildComposer () {
+    const composer = new EffectComposer(this.renderer)
+    composer.addPass(new RenderPass(this.scene, this.camera))
+
+    const bloom = new UnrealBloomPass(
+      new THREE.Vector2(window.innerWidth, window.innerHeight), 0.45, 0.5, 0.85,
+    )
+    composer.addPass(bloom)
+
+    const vignette                   = new ShaderPass(VignetteShader)
+    vignette.uniforms.offset.value   = 0.95
+    vignette.uniforms.darkness.value = 1.2
+    composer.addPass(vignette)
+
+    composer.addPass(new OutputPass())
+    this.composer  = composer
+    this.bloomPass = bloom
+  }
+
+  private applySize () {
+    const width  = window.innerWidth
+    const height = window.innerHeight
+    const dpr    = Math.min(window.devicePixelRatio, 2) * this.resolutionScale
+
+    this.renderer.setPixelRatio(dpr)
+    this.renderer.setSize(width, height)
+    this.composer?.setPixelRatio(dpr)
+    this.composer?.setSize(width, height)
+    this.bloomPass?.setSize(width, height)
+  }
+
+  private updateFps (delta: number) {
+    if (!this.fpsVisible || !this.fpsElement)
+      return
+    this.fpsAccum += delta
+    this.fpsFrames++
+    if (this.fpsAccum >= 0.4) {
+      this.fpsElement.textContent = `${Math.round(this.fpsFrames / this.fpsAccum)} fps`
+      this.fpsAccum               = 0
+      this.fpsFrames              = 0
+    }
+  }
+
+  // #endregion
 
   private readonly onResize = () => {
     this.camera.aspect = window.innerWidth / window.innerHeight
     this.camera.updateProjectionMatrix()
-    this.renderer.setSize(window.innerWidth, window.innerHeight)
+    this.applySize()
   }
 }
 

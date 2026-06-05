@@ -1,6 +1,6 @@
 import './style.css'
 import { VRMViewer } from './viewer'
-import { Toolbar } from './ui'
+import { SettingsDialog, Toolbar } from './ui'
 import { loadCatalog } from './manifest'
 import type { AnimationEntry, ModelEntry } from './types'
 
@@ -24,6 +24,14 @@ async function main () {
       toolbar.setActiveAnimation(null)
       viewer.clearSelection()
     },
+    onLightingPick: preset => viewer.setLighting(preset),
+  })
+
+
+  new SettingsDialog({
+    onFps:        on => viewer.setFpsVisible(on),
+    onPost:       on => viewer.setPostProcessing(on),
+    onResolution: scale => viewer.setResolutionScale(scale),
   })
 
   async function selectModel (entry: ModelEntry) {

@@ -12,5 +12,7 @@ original terms before using them in production.
 | ---- | ------ | ------ |
 | `Seed-san.vrm` | [vrm-c/vrm-specification](https://github.com/vrm-c/vrm-specification) | VRM Consortium official sample (VRM 1.0) |
 | `AvatarSample_A.vrm`, `AvatarSample_B.vrm`, `AvatarSample_C.vrm` | [madjin/vrm-samples](https://github.com/madjin/vrm-samples) | VRoid Project sample avatars (Pixiv) |
-| `Vita.vrm` | [madjin/vrm-samples](https://github.com/madjin/vrm-samples) | VRoid Project sample avatar (Pixiv) |
-| `Sendagaya_Shino.vrm` | [madjin/vrm-samples](https://github.com/madjin/vrm-samples) | VRoid Project sample avatar (Pixiv) |
+| `Vita.vrm`, `Vivi.vrm`, `Victoria_Rubin.vrm`, `Sendagaya_Shino.vrm`, `Sendagaya_Shibu.vrm`, `Avatar_Orion.vrm`, `masc_vroid.vrm`, `fem_vroid.vrm` | [madjin/vrm-samples](https://github.com/madjin/vrm-samples) | VRoid Project sample avatars (Pixiv) |
+
+The extra `animations/vrma/sample_motion.vrma` is the `test.vrma` sample from
+[pixiv/three-vrm](https://github.com/pixiv/three-vrm) (`three-vrm-animation` examples).

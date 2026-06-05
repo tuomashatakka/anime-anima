@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-05T01:41:33.299Z",
+  "generatedAt": "2026-06-05T02:13:09.829Z",
   "animations": [
     {
       "url": "/vrm-assets/animations/vrma/admiration.bvh",
@@ -3180,6 +3180,19 @@
         "travel": 0.08428144067233864,
         "motion": 0.3299587964549648
       }
+    },
+    {
+      "url": "/vrm-assets/animations/vrma/sample_motion.vrma",
+      "name": "Sample Motion",
+      "kind": "vrma",
+      "stance": "standing",
+      "startStance": "standing",
+      "endStance": "standing",
+      "isTransition": false,
+      "loopable": false,
+      "locomotion": null,
+      "category": "action",
+      "duration": 0
     },
     {
       "url": "/vrm-assets/animations/vrma/shoot.vrma",

@@ -237,3 +237,88 @@ body {
   opacity: 0.6;
   z-index: 5;
 }
+
+/* ---------- FPS counter ---------- */
+.fps {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  padding: 6px 12px;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--accent);
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  z-index: 10;
+  display: none;
+}
+.fps.visible { display: block; }
+
+.toolbar-button.icon-only { padding: 8px 10px; }
+
+/* ---------- Settings dialog ---------- */
+.dialog-overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  z-index: 40;
+}
+.dialog-overlay.open { display: flex; }
+
+.dialog {
+  width: min(420px, 92vw);
+  padding: 20px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  animation: pop-in 0.15s ease;
+}
+.dialog-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 14px;
+}
+.dialog-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 0;
+  border-top: 1px solid var(--panel-border);
+  font-size: 14px;
+}
+.dialog-close {
+  margin-top: 16px;
+  width: 100%;
+  padding: 10px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+}
+.dialog-close:hover { background: var(--accent); color: #06121f; }
+
+.switch { width: 40px; height: 22px; cursor: pointer; accent-color: var(--accent); }
+
+.seg { display: flex; gap: 4px; }
+.seg button {
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.seg button:hover { background: var(--accent-soft); }
+.seg button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
