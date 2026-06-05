@@ -19,11 +19,19 @@ playing animation, and animation changes are crossfade-tweened.
     transfer directly and only the hips translation is rescaled to each model.
 - **Crossfaded transitions** between animations (`AnimationAction.crossFadeFrom`).
 - **Toolbar popovers** with live filtering — one for models, one for animations.
-- **Click/tap to move** — tap the ground and the model turns and walks (or
-  jogs/crawls, whichever locomotion clip the pack provides) to that spot, then
-  returns to the selected animation. Root motion is driven in code with the
-  locomotion clip's horizontal hips translation zeroed so the legs cycle in
-  place.
+- **Click/tap to move** — tap the ground and the model turns and walks there,
+  then returns to the selected animation / idle. Tapping again while moving
+  escalates the gait (walk → jog → run); in a low stance it crawls. Root motion
+  is driven in code with the locomotion clip's horizontal hips translation zeroed
+  so the legs cycle in place.
+- **Pose state machine** — every animation is classified into a stance
+  (standing / crouching / sitting / lying) by `scripts/classify-animations.mts`.
+  Switching to an animation in a different stance inserts the correct transition
+  clip when one exists (e.g. `crouch` for stand→crouch, `standup` for
+  sit→stand). Non-looping clips (transitions, one-shot gestures) automatically
+  settle into their ending stance afterwards.
+- **Auto-idle** — with the animation deselected ("None" in the toolbar) the
+  model plays random idle clips for its current stance, on a rotating timer.
 
 ## Assets
 
@@ -55,5 +63,7 @@ bun run lint              # eslint (@tuomashatakka/eslint-config)
 | Scene / VRM / mixer / retargeting | `src/viewer.ts`  |
 | Toolbar + popovers | `src/ui.ts`                   |
 | Manifest → catalog | `src/manifest.ts`             |
+| Stance / transition / idle queries | `src/library.ts` |
 | Bootstrap          | `src/main.ts`                 |
 | Asset downloader   | `scripts/download-vrm-assets.mts` |
+| Animation classifier | `scripts/classify-animations.mts` → `public/vrm-assets/classification.json` |

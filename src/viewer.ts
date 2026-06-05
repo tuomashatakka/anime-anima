@@ -10,7 +10,9 @@ import {
   VRMLookAtQuaternionProxy,
   createVRMAnimationClip,
 } from '@pixiv/three-vrm-animation'
-import type { AnimationEntry, ModelEntry } from './types'
+import { AnimationLibrary } from './library'
+import type { AnimationEntry, Locomotion, ModelEntry, Stance } from './types'
+import { STANCE_LEVEL } from './types'
 
 
 interface BVHResult {
@@ -18,13 +20,29 @@ interface BVHResult {
   skeleton: THREE.Skeleton
 }
 
+interface PlayOptions {
+  fade?:       boolean
+  transition?: boolean
+}
+
+/** Ground travel speed (metres / second) for each gait. */
+const LOCOMOTION_SPEED: Record<Locomotion, number> = { walk: 1.3, jog: 2.4, run: 3.4, crawl: 0.6 }
+
+/** Order gaits escalate through on repeated taps while standing. */
+const GAIT_ESCALATION: Record<Locomotion, Locomotion> = { walk: 'jog', jog: 'run', run: 'run', crawl: 'crawl' }
+
+/** The shape of the three.js AnimationMixer "finished" event we care about. */
+type MixerFinishedEvent = { action: THREE.AnimationAction }
+
 /**
  * Owns the three.js scene and everything VRM-related: loading models, loading
- * animations (both .vrma and .bvh), and crossfading between animation clips.
+ * animations (both .vrma and .bvh), crossfading between clips, click-to-move
+ * locomotion, and a pose state machine (standing / crouching / sitting / lying)
+ * that inserts the correct transition animation between stances and plays random
+ * idles when nothing is selected.
  *
  * Both animation formats are compiled into AnimationClips that target the VRM's
- * *normalized* humanoid bones, so a single AnimationMixer drives everything and
- * transitions are a simple `crossFadeFrom` tween.
+ * *normalized* humanoid bones, so a single AnimationMixer drives everything.
  */
 export class VRMViewer {
   private readonly renderer: THREE.WebGLRenderer
@@ -37,16 +55,29 @@ export class VRMViewer {
   private readonly vrmaLoader = new GLTFLoader()
   private readonly bvhLoader = new BVHLoader()
 
-  private currentVRM:       VRM | null = null
-  private mixer:            THREE.AnimationMixer | null = null
-  private currentAction:    THREE.AnimationAction | null = null
-  private currentAnimation: AnimationEntry | null = null
+  private currentVRM:    VRM | null = null
+  private mixer:         THREE.AnimationMixer | null = null
+  private currentAction: THREE.AnimationAction | null = null
 
   /** Raw, model-agnostic animation data, cached after first download. */
   private readonly vrmaCache = new Map<string, VRMAnimation>()
   private readonly bvhCache = new Map<string, BVHResult>()
 
   private readonly fadeDuration = 0.45
+
+  // #region Pose state machine
+  private library:           AnimationLibrary | null = null
+  private currentStance:     Stance = 'standing'
+  private selectedAnimation: AnimationEntry | null = null
+
+  /** Called once when the active (one-shot) clip reaches its end. */
+  private onFinishCallback: (() => void) | null = null
+
+  private idleMode = false
+  private idleSwitching = false
+  private idleHold = 0
+  private lastIdleUrl: string | null = null
+  // #endregion
 
   // #region Click-to-move state
   private readonly canvas: HTMLCanvasElement
@@ -58,13 +89,11 @@ export class VRMViewer {
 
   /** Yaw applied at load (0 for VRM1, π for VRM0) — the "facing +Z" baseline. */
   private baseYaw = 0
-  private moveTarget: THREE.Vector3 | null = null
+  private moveTarget:     THREE.Vector3 | null = null
   private isMoving = false
-
-  /** A walk/jog/crawl clip used to locomote toward a tapped point. */
-  private locomotionEntry: AnimationEntry | null = null
-  private locomotionClip:  THREE.AnimationClip | null = null
-  private moveSpeed = 1.25 // metres / second
+  private moveLocomotion: Locomotion | null = null
+  private moveSpeed = LOCOMOTION_SPEED.walk
+  private readonly locomotionClips = new Map<Locomotion, THREE.AnimationClip>()
   private readonly turnSpeed = 9 // radians / second
   private readonly arriveRadius = 0.08
   // #endregion
@@ -192,56 +221,54 @@ export class VRMViewer {
     this.currentVRM = vrm
     this.scene.add(vrm.scene)
 
-    this.mixer         = new THREE.AnimationMixer(vrm.scene)
-    this.currentAction = null
+    this.mixer = new THREE.AnimationMixer(vrm.scene)
+    this.mixer.addEventListener('finished', this.onMixerFinished)
+    this.currentAction    = null
+    this.onFinishCallback = null
+    this.currentStance    = 'standing'
 
     this.frameCamera(vrm)
 
-    // Pre-build the locomotion clip for this rig so the first tap is instant.
+    // Pre-build locomotion clips for this rig so the first tap is instant.
     await this.prepareLocomotion(vrm)
 
-    // Re-apply the active animation to the new model (no crossfade — fresh rig).
-    if (this.currentAnimation)
-      await this.applyAnimation(this.currentAnimation, false)
+    // Re-apply the active selection to the new rig, or fall back to idle.
+    if (this.selectedAnimation)
+      await this.playAnimation(this.selectedAnimation, { fade: false, transition: false })
+    else
+      await this.enterIdle(false)
   }
 
-  /** Tell the viewer which animations exist so it can choose a locomotion clip. */
+  /** Index the catalog so the state machine can pick idles / transitions / gaits. */
   setAvailableAnimations (animations: AnimationEntry[]): void {
-    const find           = (re: RegExp) => animations.find(a => re.test(a.name))
-    this.locomotionEntry =
-      find(/\bwalk/i) ?? find(/\bstroll|\bmarch/i) ?? find(/\bjog/i) ??
-      find(/\brun\b/i) ?? find(/crawl/i) ?? null
-
-    const name     = this.locomotionEntry?.name.toLowerCase() ?? ''
-    this.moveSpeed = (/crawl/).test(name)
-      ? 0.6
-      : (/run/).test(name)
-        ? 3.2
-        : (/jog/).test(name)
-          ? 2.3
-          : 1.3
+    this.library = new AnimationLibrary(animations)
   }
 
   private async prepareLocomotion (vrm: VRM): Promise<void> {
-    this.locomotionClip = null
-    if (!this.locomotionEntry)
+    this.locomotionClips.clear()
+    if (!this.library)
       return
-    try {
-      const clip = this.locomotionEntry.kind === 'vrma'
-        ? await this.buildVRMAClip(this.locomotionEntry, vrm)
-        : await this.buildBVHClip(this.locomotionEntry, vrm)
-      stripHorizontalRootMotion(clip, vrm)
-      clip.name           = `__locomotion_${this.locomotionEntry.name}`
-      this.locomotionClip = clip
-    }
-    catch (error) {
-      console.warn('Could not prepare locomotion animation', error)
+
+    for (const type of [ 'walk', 'jog', 'run', 'crawl' ] as Locomotion[]) {
+      const entry = this.library.locomotion(type)
+      if (!entry)
+        continue
+      try {
+        const clip = await this.buildRawClip(entry, vrm)
+        stripHorizontalRootMotion(clip, vrm)
+        clip.name = `__loco_${type}`
+        this.locomotionClips.set(type, clip)
+      }
+      catch (error) {
+        console.warn(`Could not prepare ${type} animation`, error)
+      }
     }
   }
 
   private disposeCurrentModel () {
     if (!this.currentVRM)
       return
+    this.mixer?.removeEventListener('finished', this.onMixerFinished)
     this.mixer?.stopAllAction()
     this.scene.remove(this.currentVRM.scene)
     VRMUtils.deepDispose(this.currentVRM.scene)
@@ -263,27 +290,139 @@ export class VRMViewer {
 
   // #endregion
 
-  // #region Animation loading & playback
+  // #region Animation playback
 
-  async applyAnimation (entry: AnimationEntry, fade = true): Promise<void> {
-    // Picking an animation cancels any in-progress walk.
+  /**
+   * Play a user-selected animation. If it lives in a different stance than the
+   * model currently holds and a transition animation exists, the transition is
+   * played first; afterwards the clip itself plays (looped, or once then idle).
+   */
+  async playAnimation (entry: AnimationEntry, options: PlayOptions = {}): Promise<void> {
+    const { fade = true, transition = true } = options
     this.cancelMovement()
-    this.currentAnimation = entry
+    this.idleMode          = false
+    this.onFinishCallback  = null
+    this.selectedAnimation = entry
     if (!this.currentVRM || !this.mixer)
       return
 
-    const clip = entry.kind === 'vrma'
-      ? await this.buildVRMAClip(entry, this.currentVRM)
-      : await this.buildBVHClip(entry, this.currentVRM)
-    clip.name = entry.name
-    this.playClip(clip, fade)
+    const meta = entry.meta
+
+    // A transition clip selected directly: play once, then settle into its end.
+    if (meta?.isTransition) {
+      const clip = await this.buildRawClip(entry, this.currentVRM)
+      clip.name  = entry.name
+      this.playClip(clip, fade, false)
+      this.onFinishCallback = () => {
+        this.currentStance     = meta.endStance
+        this.selectedAnimation = null
+        void this.enterIdle(true)
+      }
+      return
+    }
+
+    const destStance = meta?.stance ?? 'standing'
+    if (transition && destStance !== this.currentStance && this.library) {
+      const transitionEntry = this.library.findTransition(this.currentStance, destStance)
+      if (transitionEntry) {
+        const clip = await this.buildRawClip(transitionEntry, this.currentVRM)
+        clip.name  = transitionEntry.name
+        this.playClip(clip, fade, false)
+        this.onFinishCallback = () => {
+          this.currentStance = destStance
+          void this.playSelectedClip(entry, true)
+        }
+        return
+      }
+    }
+
+    this.currentStance = destStance
+    await this.playSelectedClip(entry, fade)
   }
 
-  /** Play a prepared clip on the mixer, optionally crossfading from the current one. */
-  private playClip (clip: THREE.AnimationClip, fade: boolean): THREE.AnimationAction {
+  /** Play the entry's own clip — looped if it loops smoothly, else once → idle. */
+  private async playSelectedClip (entry: AnimationEntry, fade: boolean): Promise<void> {
+    if (!this.currentVRM)
+      return
+
+    const clip = await this.buildRawClip(entry, this.currentVRM)
+    clip.name  = entry.name
+
+    if (entry.meta?.loopable ?? true) {
+      this.playClip(clip, fade, true)
+      return
+    }
+
+    // One-shot: when it finishes, drop into the ending stance's idle.
+    this.playClip(clip, fade, false)
+    this.onFinishCallback = () => {
+      this.currentStance     = entry.meta?.endStance ?? this.currentStance
+      this.selectedAnimation = null
+      void this.enterIdle(true)
+    }
+  }
+
+  /** Clear the selection and start random idles for the current stance. */
+  clearSelection (): void {
+    this.selectedAnimation = null
+    this.onFinishCallback  = null
+    this.cancelMovement()
+    void this.enterIdle(true)
+  }
+
+  private async enterIdle (fade: boolean): Promise<void> {
+    this.idleMode = true
+    await this.playNextIdle(fade)
+  }
+
+  private async playNextIdle (fade: boolean): Promise<void> {
+    if (!this.library || !this.currentVRM || this.idleSwitching)
+      return
+
+    const pool = this.library.idles(this.currentStance)
+    // Schedule the next switch even if the pool is empty/static.
+    this.idleHold = 8 + Math.random() * 8
+    if (!pool.length)
+      return
+
+    let entry = pool[Math.floor(Math.random() * pool.length)]
+    if (pool.length > 1 && entry.url === this.lastIdleUrl)
+      entry = pool[(pool.indexOf(entry) + 1) % pool.length]
+    this.lastIdleUrl = entry.url
+
+    this.idleSwitching = true
+    try {
+      const clip            = await this.buildRawClip(entry, this.currentVRM)
+      clip.name             = entry.name
+      this.onFinishCallback = null
+      this.playClip(clip, fade, true)
+    }
+    finally {
+      this.idleSwitching = false
+    }
+  }
+
+  /** Build a playable clip for an entry, zeroing root travel for locomotion clips. */
+  private async buildRawClip (entry: AnimationEntry, vrm: VRM): Promise<THREE.AnimationClip> {
+    const clip = entry.kind === 'vrma'
+      ? await this.buildVRMAClip(entry, vrm)
+      : await this.buildBVHClip(entry, vrm)
+    if (entry.meta?.category === 'locomotion')
+      stripHorizontalRootMotion(clip, vrm)
+    return clip
+  }
+
+  private playClip (clip: THREE.AnimationClip, fade: boolean, loop: boolean): THREE.AnimationAction {
     const action = this.mixer!.clipAction(clip)
     action.reset()
-    action.setLoop(THREE.LoopRepeat, Infinity)
+    if (loop) {
+      action.setLoop(THREE.LoopRepeat, Infinity)
+      action.clampWhenFinished = false
+    }
+    else {
+      action.setLoop(THREE.LoopOnce, 1)
+      action.clampWhenFinished = true
+    }
     action.enabled = true
     action.setEffectiveTimeScale(1)
     action.setEffectiveWeight(1)
@@ -294,6 +433,15 @@ export class VRMViewer {
 
     this.currentAction = action
     return action
+  }
+
+  private readonly onMixerFinished = (event: MixerFinishedEvent) => {
+    if (event.action !== this.currentAction || !this.onFinishCallback)
+      return
+
+    const callback        = this.onFinishCallback
+    this.onFinishCallback = null
+    callback()
   }
 
   private async buildVRMAClip (entry: AnimationEntry, vrm: VRM): Promise<THREE.AnimationClip> {
@@ -337,7 +485,7 @@ export class VRMViewer {
   }
 
   private handleTap (clientX: number, clientY: number) {
-    if (!this.currentVRM || !this.locomotionClip)
+    if (!this.currentVRM || this.locomotionClips.size === 0)
       return
 
     const rect     = this.canvas.getBoundingClientRect()
@@ -363,17 +511,41 @@ export class VRMViewer {
   private setMoveTarget (point: THREE.Vector3) {
     this.moveTarget = point
     this.marker.position.set(point.x, 0.02, point.z)
-    this.marker.visible = true
+    this.marker.visible   = true
+    this.idleMode         = false
+    this.onFinishCallback = null
 
-    if (!this.isMoving && this.locomotionClip) {
-      this.playClip(this.locomotionClip, true)
-      this.isMoving = true
-    }
+    // Low stances crawl; standing escalates walk → jog → run on repeated taps.
+    let gait: Locomotion
+    if (STANCE_LEVEL[this.currentStance] <= STANCE_LEVEL.sitting)
+      gait = 'crawl'
+    else if (!this.isMoving || !this.moveLocomotion)
+      gait = 'walk'
+    else
+      gait = GAIT_ESCALATION[this.moveLocomotion]
+
+    this.startGait(gait)
+    this.isMoving = true
+  }
+
+  private startGait (gait: Locomotion) {
+    if (this.isMoving && this.moveLocomotion === gait)
+      return
+
+    this.moveLocomotion = gait
+    this.moveSpeed      = LOCOMOTION_SPEED[gait]
+
+    const clip = this.locomotionClips.get(gait) ??
+      this.locomotionClips.get('walk') ??
+      this.locomotionClips.values().next().value
+    if (clip)
+      this.playClip(clip, true, true)
   }
 
   private cancelMovement () {
-    this.moveTarget = null
-    this.isMoving   = false
+    this.moveTarget     = null
+    this.isMoving       = false
+    this.moveLocomotion = null
     if (this.marker)
       this.marker.visible = false
   }
@@ -408,23 +580,30 @@ export class VRMViewer {
 
   private onArrive () {
     this.cancelMovement()
-    // Return to whatever animation the toolbar had selected.
-    if (this.currentAnimation)
-      void this.applyAnimation(this.currentAnimation, true)
+    // Resume the selection (re-inserting a stance transition if needed) or idle.
+    if (this.selectedAnimation)
+      void this.playAnimation(this.selectedAnimation)
+    else
+      void this.enterIdle(true)
   }
 
   // #endregion
 
-  private frameId = 0
-
   private readonly tick = () => {
     const delta = this.clock.getDelta()
+
+    // Random idle rotation when nothing is selected and the model is at rest.
+    if (this.idleMode && !this.isMoving && !this.onFinishCallback && !this.idleSwitching) {
+      this.idleHold -= delta
+      if (this.idleHold <= 0)
+        void this.playNextIdle(true)
+    }
+
     this.updateMovement(delta)
     this.mixer?.update(delta)
     this.currentVRM?.update(delta)
     this.controls.update()
     this.renderer.render(this.scene, this.camera)
-    this.frameId++
   }
 
   private readonly onResize = () => {

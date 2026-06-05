@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "download-assets": "node scripts/download-vrm-assets.mts"
+    "download-assets": "node scripts/download-vrm-assets.mts",
+    "classify-animations": "node scripts/classify-animations.mts"
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.4.4",

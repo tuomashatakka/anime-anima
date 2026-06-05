@@ -131,9 +131,13 @@ class Popover {
   }
 }
 
+/** Sentinel id for the "no animation — auto idle" popover item. */
+const NONE_ID = '__none__'
+
 export interface ToolbarCallbacks {
-  onModelPick:     (entry: ModelEntry) => void
-  onAnimationPick: (entry: AnimationEntry) => void
+  onModelPick:      (entry: ModelEntry) => void
+  onAnimationPick:  (entry: AnimationEntry) => void
+  onAnimationClear: () => void
 }
 
 export class Toolbar {
@@ -157,6 +161,11 @@ export class Toolbar {
       document.getElementById('btn-animations') as HTMLButtonElement,
       document.getElementById('current-animation')!,
       id => {
+        if (id === NONE_ID) {
+          callbacks.onAnimationClear()
+          return
+        }
+
         const entry = this.animations.find(animation => animation.url === id)
         if (entry)
           callbacks.onAnimationPick(entry)
@@ -171,16 +180,20 @@ export class Toolbar {
 
   setAnimations (animations: AnimationEntry[]) {
     this.animations = animations
-    this.animationPopover.setItems(
-      animations.map(animation => ({ id: animation.url, label: animation.name, tag: animation.kind })),
-    )
+    this.animationPopover.setItems([
+      { id: NONE_ID, label: 'None — auto idle' },
+      ...animations.map(animation => ({ id: animation.url, label: animation.name, tag: animation.meta?.category ?? animation.kind })),
+    ])
   }
 
   setActiveModel (entry: ModelEntry) {
     this.modelPopover.setActive(entry.url, entry.name)
   }
 
-  setActiveAnimation (entry: AnimationEntry) {
-    this.animationPopover.setActive(entry.url, entry.name)
+  setActiveAnimation (entry: AnimationEntry | null) {
+    if (entry)
+      this.animationPopover.setActive(entry.url, entry.name)
+    else
+      this.animationPopover.setActive(NONE_ID, 'Auto idle')
   }
 }

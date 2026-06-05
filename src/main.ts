@@ -18,8 +18,12 @@ async function main () {
   const viewer = new VRMViewer(canvas)
 
   const toolbar = new Toolbar({
-    onModelPick:     entry => void selectModel(entry),
-    onAnimationPick: entry => void selectAnimation(entry),
+    onModelPick:      entry => void selectModel(entry),
+    onAnimationPick:  entry => void selectAnimation(entry),
+    onAnimationClear: () => {
+      toolbar.setActiveAnimation(null)
+      viewer.clearSelection()
+    },
   })
 
   async function selectModel (entry: ModelEntry) {
@@ -40,7 +44,7 @@ async function main () {
     toolbar.setActiveAnimation(entry)
     setBusy(true)
     try {
-      await viewer.applyAnimation(entry)
+      await viewer.playAnimation(entry)
     }
     catch (error) {
       console.error('Failed to load animation', entry, error)
@@ -57,16 +61,12 @@ async function main () {
     toolbar.setAnimations(catalog.animations)
     viewer.setAvailableAnimations(catalog.animations)
 
-    // Pick a sensible default model + a friendly default animation.
+    // Load a default model; leave the animation deselected so the model plays
+    // random idles automatically (loadModel starts idle when nothing is selected).
     const firstModel = catalog.models[0]
     if (firstModel)
       await selectModel(firstModel)
-
-    const defaultAnimation =
-      catalog.animations.find(a => (/idle|greeting|hello|stand/i).test(a.name)) ??
-      catalog.animations[0]
-    if (defaultAnimation)
-      await selectAnimation(defaultAnimation)
+    toolbar.setActiveAnimation(null)
   }
   catch (error) {
     console.error(error)

@@ -1,8 +1,9 @@
-import type { AnimationEntry, AnimationKind, AssetManifest, ModelEntry } from './types'
+import type { AnimationEntry, AnimationKind, AnimationMeta, AssetManifest, ClassificationFile, ModelEntry } from './types'
 
 
-const BASE         = import.meta.env.BASE_URL
-const MANIFEST_URL = `${BASE}vrm-assets/manifest.json`
+const BASE               = import.meta.env.BASE_URL
+const MANIFEST_URL       = `${BASE}vrm-assets/manifest.json`
+const CLASSIFICATION_URL = `${BASE}vrm-assets/classification.json`
 
 // Manifest paths are absolute ("/vrm-assets/…"); prefix them with the app base
 //  so they resolve correctly when hosted under a sub-path (e.g. GitHub Pages).
@@ -35,12 +36,33 @@ export interface AssetCatalog {
   animations: AnimationEntry[]
 }
 
+/** Load the pose classification (best-effort) keyed by raw manifest URL. */
+async function loadClassification (): Promise<Map<string, AnimationMeta>> {
+  const meta = new Map<string, AnimationMeta>()
+  try {
+    const response = await fetch(CLASSIFICATION_URL)
+    if (!response.ok)
+      return meta
+
+    const file = await response.json() as ClassificationFile
+    for (const item of file.animations) {
+      const { url, name: _name, kind: _kind, ...rest } = item
+      meta.set(url, rest)
+    }
+  }
+  catch {
+    // Classification is optional; fall back to undefined meta.
+  }
+  return meta
+}
+
 export async function loadCatalog (): Promise<AssetCatalog> {
   const response = await fetch(MANIFEST_URL)
   if (!response.ok)
     throw new Error(`Could not load asset manifest (${response.status}). Run \`npm run download-assets\` first.`)
 
-  const manifest = await response.json() as AssetManifest
+  const manifest  = await response.json() as AssetManifest
+  const metaByUrl = await loadClassification()
 
   const models: ModelEntry[] = (manifest.models ?? [])
     .map(url => ({ name: prettify(url), url: withBase(url) }))
@@ -60,9 +82,11 @@ export async function loadCatalog (): Promise<AssetCatalog> {
       seen.add(url)
       return true
     })
-    .map(url => {
+    .map((url): AnimationEntry | null => {
       const kind = kindOf(url)
-      return kind ? { name: prettify(url, [ 'action_', 'motion_' ]), url: withBase(url), kind } : null
+      return kind
+        ? { name: prettify(url, [ 'action_', 'motion_' ]), url: withBase(url), kind, meta: metaByUrl.get(url) }
+        : null
     })
     .filter((entry): entry is AnimationEntry => entry !== null)
     .sort((a, b) => a.name.localeCompare(b.name))
