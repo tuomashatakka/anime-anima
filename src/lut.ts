@@ -12,8 +12,8 @@ export function createCinematicLUT (size = 33): THREE.Data3DTexture {
   const last = size - 1
 
   let offset = 0
-  for (let bIndex = 0; bIndex < size; bIndex++) {
-    for (let gIndex = 0; gIndex < size; gIndex++) {
+  for (let bIndex = 0; bIndex < size; bIndex++)
+    for (let gIndex = 0; gIndex < size; gIndex++)
       for (let rIndex = 0; rIndex < size; rIndex++) {
         let r = rIndex / last
         let g = gIndex / last
@@ -26,7 +26,7 @@ export function createCinematicLUT (size = 33): THREE.Data3DTexture {
         b = clamp01((b - 0.5) * contrast + 0.5)
 
         // Tone-dependent split toning: teal in shadows, amber in highlights.
-        const lum   = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        const lum    = 0.2126 * r + 0.7152 * g + 0.0722 * b
         const shadow = 1 - lum
         r = clamp01(r + lum * 0.05 - shadow * 0.015)
         g = clamp01(g + lum * 0.02 + shadow * 0.025)
@@ -44,8 +44,6 @@ export function createCinematicLUT (size = 33): THREE.Data3DTexture {
         data[offset++] = Math.round(b * 255)
         data[offset++] = 255
       }
-    }
-  }
 
   const texture       = new THREE.Data3DTexture(data, size, size, size)
   texture.format      = THREE.RGBAFormat

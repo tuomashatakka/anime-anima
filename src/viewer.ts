@@ -8,7 +8,6 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { FilmPass } from 'three/examples/jsm/postprocessing/FilmPass.js'
 import { LUTPass } from 'three/examples/jsm/postprocessing/LUTPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
-import { VignetteShader } from 'three/examples/jsm/shaders/VignetteShader.js'
 import { Lensflare, LensflareElement } from 'three/examples/jsm/objects/Lensflare.js'
 import { CharacterController } from './character'
 import { FurnitureManager } from './furniture'
@@ -28,6 +27,9 @@ interface LightingConfig {
   key:        [number, number, [number, number, number]] // colour, intensity, position
   rim:        [number, number, [number, number, number]]
   accent:     [number, number, [number, number, number]]
+
+  /** Optional narrow theatrical spotlight: colour, intensity, position, cone angle (rad). */
+  spot?: [number, number, [number, number, number], number]
 }
 
 export const LIGHTING_PRESETS: { id: LightingPreset, label: string }[] = [
@@ -40,12 +42,13 @@ export const LIGHTING_PRESETS: { id: LightingPreset, label: string }[] = [
 const LIGHTING_CONFIG: Record<LightingPreset, LightingConfig> = {
   studio: {
     background: 0x0b0e16,
-    exposure:   1.45,
+    exposure:   1.28,
     fog:        [ 8, 30 ],
-    hemi:       [ 0x6f7ea8, 0x10131c, 0.75 ],
-    key:        [ 0xffe6c4, 3.9, [ 5, 8, 4 ]],
+    hemi:       [ 0x6f7ea8, 0x10131c, 0.7 ],
+    key:        [ 0xffe6c4, 3.3, [ 5, 8, 4 ]],
     rim:        [ 0x4f7bff, 2.9, [ -6, 5, -6 ]],
     accent:     [ 0xff2e7e, 42, [ -5, 4, 4 ]],
+    spot:       [ 0xfff2dc, 70, [ 1.6, 6.5, 2.6 ], Math.PI / 13 ],
   },
   soft: {
     background: 0x262b35,
@@ -64,6 +67,7 @@ const LIGHTING_CONFIG: Record<LightingPreset, LightingConfig> = {
     key:        [ 0x00e5ff, 3.0, [ 5, 6, 4 ]],
     rim:        [ 0xff00aa, 3.3, [ -6, 5, -5 ]],
     accent:     [ 0x9b5cff, 58, [ -4, 4, 5 ]],
+    spot:       [ 0x00e5ff, 110, [ -1.8, 6.5, 2.2 ], Math.PI / 16 ],
   },
   sunset: {
     background: 0x1d1018,
@@ -73,6 +77,7 @@ const LIGHTING_CONFIG: Record<LightingPreset, LightingConfig> = {
     key:        [ 0xffb066, 4.0, [ 6, 5, 3 ]],
     rim:        [ 0xff5e8a, 2.3, [ -5, 4, -6 ]],
     accent:     [ 0x4060ff, 20, [ -5, 5, 5 ]],
+    spot:       [ 0xffcaa0, 80, [ 2.2, 6, 2.4 ], Math.PI / 13 ],
   },
 }
 
@@ -95,6 +100,7 @@ export class VRMViewer {
   private key!:    THREE.DirectionalLight
   private rim!:    THREE.DirectionalLight
   private accent!: THREE.SpotLight
+  private spot!:   THREE.SpotLight
 
   private composer:    EffectComposer | null = null
   private bloomPass:   UnrealBloomPass | null = null
@@ -186,6 +192,13 @@ export class VRMViewer {
     this.accent.target.position.set(0, 1, 0)
     this.scene.add(this.accent, this.accent.target)
 
+    // A narrow, hard-edged theatrical spotlight (≈13° cone) some presets enable.
+    this.spot            = new THREE.SpotLight(0xffffff, 0, 30, Math.PI / 14, 0.25, 1.2)
+    this.spot.castShadow = true
+    this.spot.shadow.mapSize.set(1024, 1024)
+    this.spot.target.position.set(0, 0.9, 0)
+    this.scene.add(this.spot, this.spot.target)
+
     this.attachLensflare()
     this.setLighting('studio')
   }
@@ -225,6 +238,15 @@ export class VRMViewer {
     this.key.color.set(c.key[0]); this.key.intensity          = c.key[1]; this.key.position.set(...c.key[2])
     this.rim.color.set(c.rim[0]); this.rim.intensity          = c.rim[1]; this.rim.position.set(...c.rim[2])
     this.accent.color.set(c.accent[0]); this.accent.intensity = c.accent[1]; this.accent.position.set(...c.accent[2])
+
+    if (c.spot) {
+      this.spot.color.set(c.spot[0])
+      this.spot.intensity = c.spot[1]
+      this.spot.position.set(...c.spot[2])
+      this.spot.angle     = c.spot[3]
+    }
+    else
+      this.spot.intensity = 0
   }
 
   private buildEnvironment () {
@@ -385,7 +407,7 @@ export class VRMViewer {
     // A non-multisampled HDR target: the Lensflare's occlusion read
     // (copyFramebufferToTexture) is invalid against a multisampled framebuffer,
     // which would spam GL_INVALID_OPERATION every frame once post is enabled.
-    const drawingSize = this.renderer.getDrawingBufferSize(new THREE.Vector2())
+    const drawingSize  = this.renderer.getDrawingBufferSize(new THREE.Vector2())
     const renderTarget = new THREE.WebGLRenderTarget(drawingSize.x, drawingSize.y, {
       type:    THREE.HalfFloatType,
       samples: 0,
@@ -393,10 +415,10 @@ export class VRMViewer {
     const composer = new EffectComposer(this.renderer, renderTarget)
     composer.addPass(new RenderPass(this.scene, this.camera))
 
-    // Bloom: softer/dimmer with a lower threshold (more of the frame blooms) and
-    // a longer radius for a wider, dreamier falloff.
+    // Bloom: gentle glow with a long, soft radius. Threshold kept fairly high so
+    // only genuine highlights bloom (a low threshold blew the lit model out).
     const bloom = new UnrealBloomPass(
-      new THREE.Vector2(window.innerWidth, window.innerHeight), 0.35, 0.9, 0.6,
+      new THREE.Vector2(window.innerWidth, window.innerHeight), 0.16, 0.85, 0.85,
     )
     composer.addPass(bloom)
 
@@ -415,11 +437,6 @@ export class VRMViewer {
     // Cinematic colour grade (teal/orange split-tone, mild contrast + saturation).
     const lut       = new LUTPass({ lut: createCinematicLUT(33), intensity: 0.9 })
     composer.addPass(lut)
-
-    const vignette                   = new ShaderPass(VignetteShader)
-    vignette.uniforms.offset.value   = 0.95
-    vignette.uniforms.darkness.value = 1.2
-    composer.addPass(vignette)
 
     composer.addPass(new OutputPass())
     this.composer    = composer

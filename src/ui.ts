@@ -4,6 +4,7 @@ import type { LightingPreset } from './viewer'
 import { FURNITURE_CATALOG } from './furniture-catalog'
 import type { FurnitureItem } from './furniture-catalog'
 import { ThumbnailRenderer } from './furniture-thumbnails'
+import { loadJSON, saveJSON } from './storage'
 
 
 /** Shared, lazily-created off-screen renderer for furniture palette previews. */
@@ -335,10 +336,13 @@ export interface SettingsCallbacks {
 
 const RESOLUTION_OPTIONS = [ 0.2, 0.33, 0.5, 0.67, 1 ]
 
+/** Defaults applied the first time, before anything is persisted. */
+const DEFAULT_SETTINGS: SettingsState = { fps: false, post: true, resolution: 0.67 }
+
 /** Modal settings dialog opened from the toolbar's gear button. */
 export class SettingsDialog {
   private readonly overlay: HTMLDivElement
-  private readonly state:   SettingsState = { fps: false, post: true, resolution: 0.67 }
+  private readonly state:   SettingsState = loadJSON('settings', DEFAULT_SETTINGS)
 
   constructor (private readonly callbacks: SettingsCallbacks) {
     this.overlay           = document.createElement('div')
@@ -354,6 +358,15 @@ export class SettingsDialog {
       event.stopPropagation()
       this.open()
     })
+
+    // Apply the persisted (or default) settings to the viewer on startup.
+    this.callbacks.onFps(this.state.fps)
+    this.callbacks.onPost(this.state.post)
+    this.callbacks.onResolution(this.state.resolution)
+  }
+
+  private persist (): void {
+    saveJSON('settings', this.state)
   }
 
   private buildPanel (): HTMLElement {
@@ -365,10 +378,12 @@ export class SettingsDialog {
     panel.appendChild(this.toggleRow('Display FPS', this.state.fps, on => {
       this.state.fps = on
       this.callbacks.onFps(on)
+      this.persist()
     }))
     panel.appendChild(this.toggleRow('Post-processing', this.state.post, on => {
       this.state.post = on
       this.callbacks.onPost(on)
+      this.persist()
     }))
     panel.appendChild(this.resolutionRow())
 
@@ -408,6 +423,7 @@ export class SettingsDialog {
       button.addEventListener('click', () => {
         this.state.resolution = value
         this.callbacks.onResolution(value)
+        this.persist()
         for (const child of group.children)
           child.classList.toggle('active', child === button)
       })

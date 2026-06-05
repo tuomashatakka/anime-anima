@@ -10,6 +10,9 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:vrm": "echo 'Open http://localhost:5173/vrm-test.html with the dev server running for the VRM0/VRM1 visual parity test'",
     "download-assets": "node scripts/download-vrm-assets.mts",
     "classify-animations": "node scripts/classify-animations.mts"
   },
@@ -24,6 +27,7 @@
     "@types/three": "^0.180.0",
     "eslint": "^9",
     "typescript": "^5.6.3",
-    "vite": "^8.0.16"
+    "vite": "^8.0.16",
+    "vitest": "^4.1.8"
   }
 }

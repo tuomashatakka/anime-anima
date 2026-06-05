@@ -3,3 +3,8 @@ dist
 .DS_Store
 *.local
 .vite
+
+# Transient browser-automation + test screenshots
+.playwright-mcp/
+/*.jpeg
+/*.png

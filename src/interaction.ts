@@ -58,8 +58,11 @@ export class InteractionCoordinator {
     // Always keep the avatar's collision set in sync with the placed pieces.
     this.character.setObstacles(this.furniture.obstacles())
 
-    // Only engage when the avatar is at rest, free, and actually present.
-    if (!this.character.hasModel || this.character.isMoving || this.character.isInteracting())
+    // Engage on proximity whether or not the avatar is still walking: collision
+    // halts it right at the engage boundary (it can never actually "arrive" on a
+    // solid piece, so a moving-only gate would never fire). sitAt/lieAt cancel
+    // the movement. The interacting guard stops it re-triggering once settled.
+    if (!this.character.hasModel || this.character.isInteracting())
       return
 
     const target = this.nearest()

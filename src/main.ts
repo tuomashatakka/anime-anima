@@ -3,6 +3,7 @@ import { VRMViewer } from './viewer'
 import { InteractionCoordinator } from './interaction'
 import { FurniturePanel, SettingsDialog, Toolbar } from './ui'
 import { loadCatalog } from './manifest'
+import { loadString, saveString } from './storage'
 import type { AnimationEntry, ModelEntry } from './types'
 
 
@@ -35,9 +36,8 @@ async function main () {
     onResolution: scale => viewer.setResolutionScale(scale),
   })
 
-  // Defaults: render at 0.67× with the full post-processing stack on.
-  viewer.setResolutionScale(0.67)
-  viewer.setPostProcessing(true)
+  // Resolution / post-processing defaults (0.67×, post on) are applied by the
+  // SettingsDialog from persisted localStorage state, so no hardcoded setup here.
 
   // Furniture: a drag-and-drop placement system with on-floor move/rotate gizmos.
   const furniture             = viewer.createFurnitureManager()
@@ -71,6 +71,7 @@ async function main () {
 
   async function selectModel (entry: ModelEntry) {
     toolbar.setActiveModel(entry)
+    saveString('model', entry.url)
     setBusy(true)
     try {
       await viewer.loadModel(entry)
@@ -104,9 +105,10 @@ async function main () {
     toolbar.setAnimations(catalog.animations)
     viewer.setAvailableAnimations(catalog.animations)
 
-    // Load a default model; leave the animation deselected so the model plays
-    // random idles automatically (loadModel starts idle when nothing is selected).
-    const firstModel = catalog.models[0]
+    // Restore the last-used model if it's still in the catalog, else the first.
+    // Animation is left deselected so the model plays random idles automatically.
+    const savedUrl   = loadString('model')
+    const firstModel = catalog.models.find(model => model.url === savedUrl) ?? catalog.models[0]
     if (firstModel)
       await selectModel(firstModel)
     toolbar.setActiveAnimation(null)

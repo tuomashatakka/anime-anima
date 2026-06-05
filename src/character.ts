@@ -14,7 +14,7 @@ import type { AnimationEntry, Locomotion, ModelEntry, Stance } from './types'
 import { STANCE_LEVEL } from './types'
 
 
-interface BVHResult {
+export interface BVHResult {
   clip:     THREE.AnimationClip
   skeleton: THREE.Skeleton
 }
@@ -630,22 +630,6 @@ export class CharacterController {
 }
 
 /**
- * Pre-multiply every quaternion key in a flat [x,y,z,w,…] value array by `yaw`,
- * rotating the track's rotations in their parent frame. Used to re-face VRM0
- * hips so the body doesn't animate backwards.
- */
-function rotateQuaternionTrackValues (values: number[], yaw: THREE.Quaternion): void {
-  const q = new THREE.Quaternion()
-  for (let i = 0; i < values.length; i += 4) {
-    q.set(values[i], values[i + 1], values[i + 2], values[i + 3]).premultiply(yaw)
-    values[i]     = q.x
-    values[i + 1] = q.y
-    values[i + 2] = q.z
-    values[i + 3] = q.w
-  }
-}
-
-/**
  * Convert a BVH clip into an AnimationClip targeting a VRM's normalized humanoid
  * bones. The SillyTavern BVH pack already names its joints with VRM humanoid
  * bone names and rests in a T-pose identical to the VRM normalized rig, so the
@@ -653,22 +637,19 @@ function rotateQuaternionTrackValues (values: number[], yaw: THREE.Quaternion): 
  * to the target model's proportions (matching how createVRMAnimationClip does
  * it for .vrma files).
  */
-function retargetBVHToVRM (bvh: BVHResult, vrm: VRM): THREE.AnimationClip {
+export function retargetBVHToVRM (bvh: BVHResult, vrm: VRM): THREE.AnimationClip {
   const humanoid      = vrm.humanoid
   const rootBone      = bvh.skeleton.bones.find(bone => bone.name === 'hips') ?? bvh.skeleton.bones[0]
   const restHipsY     = rootBone?.position.y || 1
   const humanoidHipsY = humanoid.normalizedRestPose.hips?.position?.[1] ?? restHipsY
   const hipScale      = humanoidHipsY / restHipsY
 
-  // VRM 0.0 rigs natively face -Z, so VRMUtils.rotateVRM0 rotates vrm.scene by π
-  // to make them face +Z like VRM 1.0. The BVH pack's hips track is authored in
-  // the canonical +Z-facing humanoid space, so composing it with that scene
-  // rotation would face the whole body backwards. Counter-rotate the hips track
-  // by π for VRM0 so the net world facing matches VRM1 (the steering logic keys
-  // off the same baseYaw = π, so this cancels out cleanly for movement too).
-  const isVRM0  = vrm.meta?.metaVersion === '0'
-  const hipsYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
-
+  // VRM 0.0 humanoid bones are authored facing -Z, so every bone-local rotation
+  // (and the hips translation) must be mirrored across the Y axis — i.e.
+  // conjugated by a 180° Y rotation, which negates the X and Z components. This
+  // is exactly what three-vrm's createVRMAnimationClip does for metaVersion '0'
+  // (hence .vrma clips were always correct); the BVH retarget must match it.
+  const isVRM0                        = vrm.meta?.metaVersion === '0'
   const tracks: THREE.KeyframeTrack[] = []
 
   for (const track of bvh.clip.tracks) {
@@ -679,21 +660,19 @@ function retargetBVHToVRM (bvh: BVHResult, vrm: VRM): THREE.AnimationClip {
     if (!node)
       continue
 
-    if (property === 'quaternion') {
-      const values = Array.from(track.values)
-      if (isVRM0 && boneName === 'hips')
-        rotateQuaternionTrackValues(values, hipsYaw)
+    if (property === 'quaternion')
+      // Negate x and z (even indices) of each [x,y,z,w] quaternion for VRM0.
       tracks.push(new THREE.QuaternionKeyframeTrack(
         `${node.name}.quaternion`,
         Array.from(track.times),
-        values,
+        Array.from(track.values, (value, i) => isVRM0 && i % 2 === 0 ? -value : value),
       ))
-    }
     else if (property === 'position' && boneName === 'hips')
+      // Scale to the rig, and negate x/z (not y) of the hips translation for VRM0.
       tracks.push(new THREE.VectorKeyframeTrack(
         `${node.name}.position`,
         Array.from(track.times),
-        Array.from(track.values, value => value * hipScale),
+        Array.from(track.values, (value, i) => (isVRM0 && i % 3 !== 1 ? -value : value) * hipScale),
       ))
   }
 
