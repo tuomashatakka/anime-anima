@@ -9,33 +9,32 @@ import { FilmPass } from 'three/examples/jsm/postprocessing/FilmPass.js'
 import { LUTPass } from 'three/examples/jsm/postprocessing/LUTPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { Lensflare, LensflareElement } from 'three/examples/jsm/objects/Lensflare.js'
+import { applyEnvironment } from '@tuomashatakka/threejs-scenes/lighting'
+import type { LightingConfig as LibLightingConfig } from '@tuomashatakka/threejs-scenes/lighting'
+import { makeFlareGhost, makeFlareMain, makeFlareRing, makeLightCone } from './lighting-helpers'
 import { CharacterController } from './character'
 import { FurnitureManager } from './furniture'
 import { FurnitureStore } from './furniture-store'
+import { LightManager } from './lights'
+import { LightStore } from './light-store'
 import { WallTool } from './walls'
 import { createCinematicLUT } from './lut'
 import { AshParticles } from './ash'
 import { ColorGradeShader, DEFAULT_GRADE } from './grade'
 import type { ColorGrade } from './grade'
+import { loadString, saveString } from './storage'
 import type { AnimationEntry, ModelEntry } from './types'
 
 
-export type LightingPreset = 'dramatic' | 'studio' | 'soft' | 'neon' | 'sunset'
+export type LightingPreset =
+  | 'dramatic' | 'studio' | 'soft' | 'neon' | 'sunset' |
+  'moonlight' | 'noir' | 'candle' | 'cyber'
 
-interface LightingConfig {
-  background: number
-  exposure:   number
-  fog:        [number, number]
-  hemi:       [number, number, number] // sky, ground, intensity
-  key:        [number, number, [number, number, number]] // colour, intensity, position
-  rim:        [number, number, [number, number, number]]
-  accent:     [number, number, [number, number, number]]
+/** The library's preset shape plus an optional IBL (environment) intensity. */
+interface LightingConfig extends LibLightingConfig {
 
-  /** Optional narrow theatrical spotlight: colour, intensity, position, cone angle (rad). */
-  spot?: [number, number, [number, number, number], number]
-
-  /** Optional pair of visible cone-shaped beams converging on the stage: colour, intensity. */
-  beams?: [number, number]
+  /** Image-based-lighting strength for this preset (scene.environmentIntensity). */
+  env?: number
 }
 
 export const LIGHTING_PRESETS: { id: LightingPreset, label: string }[] = [
@@ -44,6 +43,10 @@ export const LIGHTING_PRESETS: { id: LightingPreset, label: string }[] = [
   { id: 'soft', label: 'Soft' },
   { id: 'neon', label: 'Neon Night' },
   { id: 'sunset', label: 'Sunset' },
+  { id: 'moonlight', label: 'Moonlight' },
+  { id: 'noir', label: 'Film Noir' },
+  { id: 'candle', label: 'Candlelit' },
+  { id: 'cyber', label: 'Cyberpunk' },
 ]
 
 const LIGHTING_CONFIG: Record<LightingPreset, LightingConfig> = {
@@ -51,6 +54,7 @@ const LIGHTING_CONFIG: Record<LightingPreset, LightingConfig> = {
   dramatic: {
     background: 0x040507,
     exposure:   1.18,
+    env:        0.12,
     fog:        [ 9, 30 ],
     hemi:       [ 0x222d40, 0x040507, 0.16 ],
     key:        [ 0xfff0d8, 0.7, [ 5, 9, 5 ]],
@@ -61,6 +65,7 @@ const LIGHTING_CONFIG: Record<LightingPreset, LightingConfig> = {
   studio: {
     background: 0x0b0e16,
     exposure:   1.18,
+    env:        0.55,
     fog:        [ 8, 30 ],
     hemi:       [ 0x6f7ea8, 0x10131c, 0.62 ],
     key:        [ 0xffe6c4, 3.1, [ 5, 8, 4 ]],
@@ -71,6 +76,7 @@ const LIGHTING_CONFIG: Record<LightingPreset, LightingConfig> = {
   soft: {
     background: 0x262b35,
     exposure:   1.22,
+    env:        0.85,
     fog:        [ 12, 36 ],
     hemi:       [ 0xc8d2ec, 0x4a505e, 1.15 ],
     key:        [ 0xfff4e8, 2.7, [ 4, 7, 5 ]],
@@ -80,6 +86,7 @@ const LIGHTING_CONFIG: Record<LightingPreset, LightingConfig> = {
   neon: {
     background: 0x0a0814,
     exposure:   1.38,
+    env:        0.2,
     fog:        [ 6, 24 ],
     hemi:       [ 0x303060, 0x0a0814, 0.45 ],
     key:        [ 0x00e5ff, 2.8, [ 5, 6, 4 ]],
@@ -90,12 +97,63 @@ const LIGHTING_CONFIG: Record<LightingPreset, LightingConfig> = {
   sunset: {
     background: 0x1d1018,
     exposure:   1.4,
+    env:        0.45,
     fog:        [ 9, 32 ],
     hemi:       [ 0x8a647e, 0x241016, 0.82 ],
     key:        [ 0xffb066, 3.8, [ 6, 5, 3 ]],
     rim:        [ 0xff5e8a, 2.2, [ -5, 4, -6 ]],
     accent:     [ 0x4060ff, 19, [ -5, 5, 5 ]],
     spot:       [ 0xffcaa0, 75, [ 2.2, 6, 2.4 ], Math.PI / 13 ],
+  },
+  // Cool moonlit night — soft blue key from high overhead, gentle fill.
+  moonlight: {
+    background: 0x070b16,
+    exposure:   1.28,
+    env:        0.25,
+    fog:        [ 8, 30 ],
+    hemi:       [ 0x2a3a66, 0x060810, 0.5 ],
+    key:        [ 0xbcd0ff, 1.8, [ 3, 10, 4 ]],
+    rim:        [ 0x4a6cff, 1.6, [ -5, 6, -6 ]],
+    accent:     [ 0x8fb4ff, 12, [ -4, 5, 4 ]],
+    spot:       [ 0xcfe0ff, 45, [ 0.5, 7, 2.5 ], Math.PI / 12 ],
+  },
+  // High-contrast theatrical black-and-near-white: one hard key + crossing beams.
+  noir: {
+    background: 0x020203,
+    exposure:   1.1,
+    env:        0.08,
+    fog:        [ 7, 26 ],
+    hemi:       [ 0x14161c, 0x000000, 0.1 ],
+    key:        [ 0xf6f2ea, 2.2, [ 4, 9, 3 ]],
+    rim:        [ 0x9fb0c8, 1.8, [ -5, 5, -5 ]],
+    accent:     [ 0xffffff, 0, [ -5, 4, 4 ]],
+    spot:       [ 0xfff6e6, 38, [ 1.2, 7, 2.2 ], Math.PI / 16 ],
+    beams:      [ 0xeef0f4, 55 ],
+  },
+  // Warm, dim, cosy candlelight pooling low and close.
+  candle: {
+    background: 0x140b06,
+    exposure:   1.42,
+    env:        0.15,
+    fog:        [ 6, 22 ],
+    hemi:       [ 0x4a2c14, 0x0a0603, 0.35 ],
+    key:        [ 0xff9d4a, 2.0, [ 2.5, 4.5, 2.5 ]],
+    rim:        [ 0xff6a2a, 1.1, [ -3, 3, -4 ]],
+    accent:     [ 0xffb060, 22, [ -3, 3.5, 3 ]],
+    spot:       [ 0xffbf80, 40, [ 1.0, 4.5, 1.8 ], Math.PI / 11 ],
+  },
+  // Punchy magenta/cyan neon over near-black — with converging coloured beams.
+  cyber: {
+    background: 0x080312,
+    exposure:   1.45,
+    env:        0.3,
+    fog:        [ 6, 24 ],
+    hemi:       [ 0x2a0a4a, 0x03060a, 0.4 ],
+    key:        [ 0xff2ec4, 3.0, [ 5, 6, 4 ]],
+    rim:        [ 0x18e0ff, 3.4, [ -6, 5, -5 ]],
+    accent:     [ 0x8a2eff, 42, [ -4, 4, 5 ]],
+    spot:       [ 0x18e0ff, 48, [ -1.6, 6.5, 2.2 ], Math.PI / 14 ],
+    beams:      [ 0xff2ec4, 80 ],
   },
 }
 
@@ -114,14 +172,15 @@ export class VRMViewer {
   private readonly character: CharacterController
 
   // #region Rendering / lighting / settings
-  private hemi!:   THREE.HemisphereLight
-  private key!:    THREE.DirectionalLight
-  private rim!:    THREE.DirectionalLight
-  private accent!: THREE.SpotLight
-  private spot!:   THREE.SpotLight
-  private beams!:  THREE.SpotLight[]
-  private cones!:  THREE.Mesh[]
-  private ash:     AshParticles | null = null
+  private hemi!:           THREE.HemisphereLight
+  private key!:            THREE.DirectionalLight
+  private rim!:            THREE.DirectionalLight
+  private accent!:         THREE.SpotLight
+  private spot!:           THREE.SpotLight
+  private beams!:          THREE.SpotLight[]
+  private cones!:          THREE.Mesh[]
+  private currentLighting: LightingPreset = 'dramatic'
+  private ash:             AshParticles | null = null
 
   private composer:       EffectComposer | null = null
   private bloomPass:      UnrealBloomPass | null = null
@@ -222,8 +281,19 @@ export class VRMViewer {
     this.spot.target.position.set(0, 0.9, 0)
     this.scene.add(this.spot, this.spot.target)
 
-    // Two crossing beams + their visible volumetric cones (the "valokiilat"),
-    // pooling on the stage centre — toggled on by presets that set `beams`.
+    this.buildBeams()
+    this.attachLensflare()
+
+    // Restore the last-used preset, falling back to the default if none/invalid.
+    const saved = loadString('lighting') as LightingPreset | null
+    this.setLighting(saved && saved in LIGHTING_CONFIG ? saved : 'dramatic')
+  }
+
+  /**
+   * Two crossing beams + their visible volumetric cones (the "valokiilat"),
+   * pooling on the stage centre — toggled on by presets that set `beams`.
+   */
+  private buildBeams () {
     const beamPositions: [number, number, number][] = [[ -3.6, 7.6, 3.4 ], [ 3.6, 7.6, 3.4 ]]
     const target                                    = new THREE.Vector3(0, 0.55, 0)
     this.beams                                      = []
@@ -242,9 +312,6 @@ export class VRMViewer {
       this.scene.add(cone)
       this.cones.push(cone)
     }
-
-    this.attachLensflare()
-    this.setLighting('dramatic')
   }
 
   /**
@@ -274,13 +341,21 @@ export class VRMViewer {
   }
 
   /** Apply a named lighting preset (background, fog, exposure and all lights). */
+  /** The currently-applied lighting preset (persisted across reloads). */
+  getLighting (): LightingPreset {
+    return this.currentLighting
+  }
+
   setLighting (preset: LightingPreset): void {
-    const c = LIGHTING_CONFIG[preset];
+    const c              = LIGHTING_CONFIG[preset]
+    this.currentLighting = preset
+    saveString('lighting', preset);
     (this.scene.background as THREE.Color).set(c.background);
     (this.scene.fog as THREE.Fog).color.set(c.background);
     (this.scene.fog as THREE.Fog).near = c.fog[0];
     (this.scene.fog as THREE.Fog).far  = c.fog[1]
     this.renderer.toneMappingExposure  = c.exposure
+    this.scene.environmentIntensity    = c.env ?? 0.3
 
     this.hemi.color.set(c.hemi[0])
     this.hemi.groundColor.set(c.hemi[1])
@@ -317,6 +392,10 @@ export class VRMViewer {
 
   private buildEnvironment () {
     this.buildLighting()
+
+    // Image-based ambient lighting (RoomEnvironment PMREM) from the scene library.
+    // Per-preset strength is driven via scene.environmentIntensity in setLighting.
+    applyEnvironment(this.scene, this.renderer, { intensity: 0.3 })
 
     // Reflective floor (real planar reflections) for a polished, dramatic stage.
     const dpr   = Math.min(window.devicePixelRatio, 2)
@@ -489,24 +568,24 @@ export class VRMViewer {
     // Bloom: gentle glow with a long, soft radius. Threshold kept fairly high so
     // only genuine highlights bloom (a low threshold blew the lit model out).
     const bloom = new UnrealBloomPass(
-      new THREE.Vector2(window.innerWidth, window.innerHeight), 0.16, 0.85, 0.85,
+      new THREE.Vector2(window.innerWidth, window.innerHeight), 0.04, 1.15, 0.92,
     )
     composer.addPass(bloom)
 
     // God rays — screen-space radial light scattering from the key light.
     const godRays                   = new ShaderPass(GodRaysShader)
-    godRays.uniforms.exposure.value = 0.5
-    godRays.uniforms.decay.value    = 0.95
-    godRays.uniforms.density.value  = 0.92
+    godRays.uniforms.exposure.value = 0.35
+    godRays.uniforms.decay.value    = 0.5
+    godRays.uniforms.density.value  = 2.0
     godRays.uniforms.weight.value   = 0.5
-    composer.addPass(godRays)
+    // composer.addPass(godRays)
 
     // Strong, animated film grain.
     const film = new FilmPass(0.6, false)
     composer.addPass(film)
 
     // Cinematic colour grade (teal/orange split-tone, mild contrast + saturation).
-    const lut       = new LUTPass({ lut: createCinematicLUT(33), intensity: 0.9 })
+    const lut       = new LUTPass({ lut: createCinematicLUT(33), intensity: 0.49 })
     composer.addPass(lut)
 
     // User-adjustable brightness / contrast / gamma / saturation.
@@ -586,6 +665,17 @@ export class VRMViewer {
       canvas:   this.canvas,
       baseUrl:  import.meta.env.BASE_URL,
       store:    new FurnitureStore(),
+    })
+  }
+
+  /** A movable / aimable spotlight editor wired to this viewer's scene + input. */
+  createLightManager (): LightManager {
+    return new LightManager({
+      scene:    this.scene,
+      camera:   this.camera,
+      controls: this.controls,
+      canvas:   this.canvas,
+      store:    new LightStore(),
     })
   }
 
@@ -689,152 +779,4 @@ const GodRaysShader = {
       gl_FragColor = vec4( base.rgb + rays * exposure, base.a );
     }
   `,
-}
-
-/**
- * Build a soft radial-gradient sprite for lens-flare elements: an opaque (or
- * hollow, for ghosts) warm core fading to transparent. Generated on a canvas so
- * no texture assets need shipping.
- */
-type FlareCanvasReturnType = { canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, half: number }
-
-function flareCanvas (size: number): FlareCanvasReturnType {
-  const canvas  = document.createElement('canvas')
-  canvas.width  = size
-  canvas.height = size
-  return { canvas, ctx: canvas.getContext('2d')!, half: size / 2 }
-}
-
-function flareTexture (canvas: HTMLCanvasElement): THREE.CanvasTexture {
-  const texture      = new THREE.CanvasTexture(canvas)
-  texture.colorSpace = THREE.SRGBColorSpace
-  return texture
-}
-
-/** The main burst: a tight white core, warm halo, faint starburst + anamorphic streak. */
-function makeFlareMain (size: number): THREE.CanvasTexture {
-  const { canvas, ctx, half } = flareCanvas(size)
-  const glow                  = ctx.createRadialGradient(half, half, 0, half, half, half)
-  glow.addColorStop(0, 'rgba(255,255,255,1)')
-  glow.addColorStop(0.05, 'rgba(255,249,233,0.95)')
-  glow.addColorStop(0.16, 'rgba(255,228,188,0.30)')
-  glow.addColorStop(0.45, 'rgba(255,216,170,0.05)')
-  glow.addColorStop(1, 'rgba(255,255,255,0)')
-  ctx.fillStyle = glow
-  ctx.fillRect(0, 0, size, size)
-
-  ctx.globalCompositeOperation = 'lighter'
-  for (let i = 0; i < 12; i++) {
-    const angle     = i / 12 * Math.PI * 2
-    ctx.strokeStyle = `rgba(255,246,226,${i % 3 === 0 ? 0.3 : 0.14})`
-    ctx.lineWidth   = i % 3 === 0 ? 2 : 1
-    ctx.beginPath()
-    ctx.moveTo(half, half)
-    ctx.lineTo(half + Math.cos(angle) * half * 0.96, half + Math.sin(angle) * half * 0.96)
-    ctx.stroke()
-  }
-
-  const streak = ctx.createLinearGradient(0, half, size, half)
-  streak.addColorStop(0, 'rgba(150,190,255,0)')
-  streak.addColorStop(0.5, 'rgba(170,205,255,0.5)')
-  streak.addColorStop(1, 'rgba(150,190,255,0)')
-  ctx.fillStyle = streak
-  ctx.fillRect(0, half - size * 0.012, size, size * 0.024)
-
-  return flareTexture(canvas)
-}
-
-/** A thin halo ring (anamorphic / aperture diffraction halo). */
-function makeFlareRing (size: number): THREE.CanvasTexture {
-  const { canvas, ctx, half } = flareCanvas(size)
-  const ring                  = ctx.createRadialGradient(half, half, half * 0.62, half, half, half * 0.96)
-  ring.addColorStop(0, 'rgba(255,255,255,0)')
-  ring.addColorStop(0.5, 'rgba(190,215,255,0.5)')
-  ring.addColorStop(1, 'rgba(255,255,255,0)')
-  ctx.fillStyle = ring
-  ctx.fillRect(0, 0, size, size)
-  return flareTexture(canvas)
-}
-
-/** A soft hexagonal aperture ghost. */
-function makeFlareGhost (size: number): THREE.CanvasTexture {
-  const { canvas, ctx, half } = flareCanvas(size)
-  const r                     = half * 0.72
-  ctx.beginPath()
-  for (let i = 0; i < 6; i++) {
-    const angle = Math.PI / 6 + i * Math.PI / 3
-    const x     = half + Math.cos(angle) * r
-    const y     = half + Math.sin(angle) * r
-    if (i === 0)
-      ctx.moveTo(x, y)
-    else
-      ctx.lineTo(x, y)
-  }
-  ctx.closePath()
-  ctx.clip()
-
-  const fill = ctx.createRadialGradient(half, half, 0, half, half, r)
-  fill.addColorStop(0, 'rgba(255,255,255,0.5)')
-  fill.addColorStop(0.7, 'rgba(255,255,255,0.16)')
-  fill.addColorStop(1, 'rgba(255,255,255,0)')
-  ctx.fillStyle = fill
-  ctx.fillRect(0, 0, size, size)
-  return flareTexture(canvas)
-}
-
-/**
- * A visible volumetric light cone (additive) from `from` to `to`: bright near
- * the apex, soft silhouette via a view-angle rim term. Double-sided so the
- * overlapping front/back faces read as a soft shaft of light.
- */
-function makeLightCone (from: THREE.Vector3, to: THREE.Vector3): THREE.Mesh {
-  const height   = from.distanceTo(to)
-  const radius   = height * 0.16
-  const geometry = new THREE.ConeGeometry(radius, height, 40, 1, true)
-  geometry.translate(0, -height / 2, 0)
-
-  const material = new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite:  false,
-    blending:    THREE.AdditiveBlending,
-    side:        THREE.DoubleSide,
-    uniforms:    {
-      uColor:  { value: new THREE.Color(0xffffff) },
-      uHeight: { value: height },
-    },
-    vertexShader: /* glsl */`
-      varying float vT;
-      varying vec3 vNormalV;
-      varying vec3 vViewDir;
-      uniform float uHeight;
-      void main() {
-        vT = -position.y / uHeight;
-        vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        vNormalV = normalize(normalMatrix * normal);
-        vViewDir = normalize(-mv.xyz);
-        gl_Position = projectionMatrix * mv;
-      }
-    `,
-    fragmentShader: /* glsl */`
-      varying float vT;
-      varying vec3 vNormalV;
-      varying vec3 vViewDir;
-      uniform vec3 uColor;
-      void main() {
-        float rim = pow(1.0 - abs(dot(normalize(vNormalV), normalize(vViewDir))), 1.5);
-        float vertical = pow(1.0 - clamp(vT, 0.0, 1.0), 1.15);
-        // Additive: keep alpha = 1 and put all brightness in rgb (avoids an a^2 falloff).
-        float a = vertical * (0.16 + 0.6 * rim);
-        gl_FragColor = vec4(uColor * a * 1.7, 1.0);
-      }
-    `,
-  })
-
-  const mesh = new THREE.Mesh(geometry, material)
-  mesh.position.copy(from)
-  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), to.clone().sub(from)
-    .normalize())
-  mesh.renderOrder   = 3
-  mesh.frustumCulled = false
-  return mesh
 }

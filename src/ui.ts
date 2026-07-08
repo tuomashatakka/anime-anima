@@ -7,6 +7,8 @@ import { ThumbnailRenderer } from './furniture-thumbnails'
 import { loadJSON, saveJSON } from './storage'
 import { DEFAULT_GRADE } from './grade'
 import type { ColorGrade } from './grade'
+import type { LightRecord } from './light-store'
+import type { LightMode } from './lights'
 
 
 /** Shared, lazily-created off-screen renderer for furniture palette previews. */
@@ -224,6 +226,12 @@ export class Toolbar {
       { id: NONE_ID, label: 'None — auto idle' },
       ...animations.map(animation => ({ id: animation.url, label: animation.name, tag: animation.meta?.category ?? animation.kind })),
     ])
+  }
+
+  /** Reflect the active lighting preset in the toolbar (e.g. restored on load). */
+  setActiveLighting (preset: LightingPreset) {
+    const match = LIGHTING_PRESETS.find(p => p.id === preset)
+    this.lightingPopover.setActive(preset, match?.label ?? preset)
   }
 
   setActiveModel (entry: ModelEntry) {
@@ -487,5 +495,195 @@ export class SettingsDialog {
 
   private close () {
     this.overlay.classList.remove('open')
+  }
+}
+
+/** Callbacks the light panel drives back into the LightManager. */
+export interface LightPanelCallbacks {
+  onAdd:    () => void
+  onRemove: () => void
+  onMode:   (mode: LightMode) => void
+  onChange: (partial: Partial<Omit<LightRecord, 'id'>>) => void
+}
+
+/** A numeric spotlight parameter and how it maps to the slider (display units). */
+interface LightControl {
+  label:        string
+  key:          'intensity' | 'angle' | 'penumbra' | 'distance'
+  min:          number
+  max:          number
+  step:         number
+  unit?:        string
+  toDisplay?:   (value: number) => number
+  fromDisplay?: (value: number) => number
+}
+
+const RAD2DEG                        = 180 / Math.PI
+const LIGHT_CONTROLS: LightControl[] = [
+  { label: 'Intensity', key: 'intensity', min: 0, max: 200, step: 1 },
+  {
+    label:       'Cone angle',
+    key:         'angle',
+    min:         5,
+    max:         80,
+    step:        1,
+    unit:        '°',
+    toDisplay:   radians => radians * RAD2DEG,
+    fromDisplay: degrees => degrees / RAD2DEG,
+  },
+  { label: 'Penumbra', key: 'penumbra', min: 0, max: 1, step: 0.01 },
+  { label: 'Distance', key: 'distance', min: 0, max: 60, step: 1 },
+]
+
+/**
+ * A floating card for editing spotlights, shown while the light tool is active.
+ * With nothing selected it offers "Add spotlight"; selecting a light reveals a
+ * move/aim toggle, a colour picker and sliders for intensity / cone angle /
+ * penumbra / distance. Every edit is pushed straight to the LightManager via
+ * `onChange`, which patches the store (and persists it).
+ */
+export class LightPanel {
+  private readonly root:       HTMLDivElement
+  private readonly params:     HTMLDivElement
+  private readonly modeButtons = new Map<LightMode, HTMLButtonElement>()
+  private readonly sliders = new Map<LightControl['key'], { input: HTMLInputElement, value: HTMLSpanElement }>()
+  private readonly colorInput: HTMLInputElement
+  private current:             LightRecord | null = null
+
+  constructor (private readonly callbacks: LightPanelCallbacks) {
+    this.root           = document.createElement('div')
+    this.root.className = 'light-panel'
+    this.root.innerHTML = '<header class="light-panel-title">Spotlights</header>'
+
+    const add       = document.createElement('button')
+    add.className   = 'light-add'
+    add.textContent = '+ Add spotlight'
+    add.addEventListener('click', () => this.callbacks.onAdd())
+    this.root.appendChild(add)
+
+    this.params           = document.createElement('div')
+    this.params.className = 'light-params'
+    this.params.appendChild(this.modeRow())
+    this.params.appendChild(this.colorRow())
+    for (const control of LIGHT_CONTROLS)
+      this.params.appendChild(this.sliderRow(control))
+
+    const remove       = document.createElement('button')
+    remove.className   = 'dialog-close'
+    remove.textContent = '✕ Remove light'
+    remove.addEventListener('click', () => this.callbacks.onRemove())
+    this.params.appendChild(remove)
+
+    this.colorInput = this.params.querySelector('input[type=color]')!
+    this.root.appendChild(this.params)
+    document.getElementById('app')!.appendChild(this.root)
+  }
+
+  /** Show / hide the whole panel with the editing tool. */
+  setActive (active: boolean): void {
+    this.root.classList.toggle('open', active)
+  }
+
+  /** Reflect the current move/aim mode in the segmented control. */
+  setMode (mode: LightMode): void {
+    for (const [ key, button ] of this.modeButtons)
+      button.classList.toggle('active', key === mode)
+  }
+
+  /** Populate (or hide) the parameter controls for the selected light. */
+  setSelected (record: LightRecord | null): void {
+    this.current = record
+    this.params.classList.toggle('visible', record !== null)
+    if (!record)
+      return
+
+    for (const control of LIGHT_CONTROLS) {
+      const row             = this.sliders.get(control.key)!
+      const display         = control.toDisplay ? control.toDisplay(record[control.key]) : record[control.key]
+      row.input.value       = String(display)
+      row.value.textContent = this.format(control, display)
+    }
+    this.colorInput.value = `#${record.color.toString(16).padStart(6, '0')}`
+  }
+
+  private format (control: LightControl, display: number): string {
+    const rounded = control.step < 1 ? display.toFixed(2) : Math.round(display).toString()
+    return control.unit ? `${rounded}${control.unit}` : rounded
+  }
+
+  private modeRow (): HTMLElement {
+    const row     = document.createElement('div')
+    row.className = 'dialog-row'
+    row.innerHTML = '<span>Gizmo</span>'
+
+    const group     = document.createElement('div')
+    group.className = 'seg'
+
+    const modes: { mode: LightMode, label: string }[] = [
+      { mode: 'move', label: 'Move' },
+      { mode: 'aim', label: 'Aim' },
+    ]
+    for (const { mode, label } of modes) {
+      const button       = document.createElement('button')
+      button.textContent = label
+      button.addEventListener('click', () => {
+        this.setMode(mode)
+        this.callbacks.onMode(mode)
+      })
+      this.modeButtons.set(mode, button)
+      group.appendChild(button)
+    }
+    row.appendChild(group)
+    return row
+  }
+
+  private colorRow (): HTMLElement {
+    const row     = document.createElement('label')
+    row.className = 'dialog-row'
+    row.innerHTML = '<span>Colour</span>'
+
+    const input     = document.createElement('input')
+    input.type      = 'color'
+    input.className = 'color-input'
+    input.addEventListener('input', () => {
+      if (this.current)
+        this.callbacks.onChange({ color: parseInt(input.value.slice(1), 16) })
+    })
+    row.appendChild(input)
+    return row
+  }
+
+  private sliderRow (control: LightControl): HTMLElement {
+    const row     = document.createElement('div')
+    row.className = 'dialog-row'
+    row.innerHTML = `<span>${control.label}</span>`
+
+    const wrap     = document.createElement('div')
+    wrap.className = 'slider-wrap'
+
+    const input     = document.createElement('input')
+    input.type      = 'range'
+    input.className = 'slider'
+    input.min       = String(control.min)
+    input.max       = String(control.max)
+    input.step      = String(control.step)
+
+    const value     = document.createElement('span')
+    value.className = 'slider-value'
+
+    input.addEventListener('input', () => {
+      if (!this.current)
+        return
+
+      const display     = parseFloat(input.value)
+      const stored      = control.fromDisplay ? control.fromDisplay(display) : display
+      value.textContent = this.format(control, display)
+      this.callbacks.onChange({ [control.key]: stored })
+    })
+
+    wrap.append(input, value)
+    row.appendChild(wrap)
+    this.sliders.set(control.key, { input, value })
+    return row
   }
 }

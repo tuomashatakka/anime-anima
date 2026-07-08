@@ -13,7 +13,18 @@ playing animation, and animation changes are crossfade-tweened.
   SillyTavern pack plus VRM Consortium / VRoid sample avatars (see
   `public/vrm-assets/models/CREDITS.md`).
 - **Dramatic stage lighting** (warm key + cool rim + magenta kicker, ACES tone
-  mapping) over a **reflective floor** (`Reflector` planar reflections).
+  mapping) over a **reflective floor** (`Reflector` planar reflections). Ships
+  nine named presets — Dramatic, Studio, Soft, Neon Night, Sunset, Moonlight,
+  Film Noir, Candlelit and Cyberpunk — each also tuning an **image-based
+  environment** (`applyEnvironment` from
+  [`@tuomashatakka/threejs-scenes`](https://www.npmjs.com/package/@tuomashatakka/threejs-scenes)).
+  The active preset is remembered across reloads.
+- **Movable spotlights** — the *Lights* tool lets you add, position and aim your
+  own spotlights via a three.js `TransformControls` gizmo (Move drags the light,
+  Aim drags its target), with per-light intensity / cone-angle / penumbra /
+  distance / colour controls. Placed lights persist in `localStorage`. Lives in
+  `src/lights.ts` (view) + `src/light-store.ts` (state), mirroring the furniture
+  manager's store/view split.
 - **Two animation formats**, both compiled to clips that drive the VRM's
   *normalized* humanoid bones so a single `AnimationMixer` handles them:
   - `.vrma` — via `@pixiv/three-vrm-animation` (`createVRMAnimationClip`).

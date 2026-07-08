@@ -81,6 +81,9 @@ export class FurnitureManager {
   /** Notified whenever the selection appears / disappears (drives the UI). */
   onSelectionChange: ((hasSelection: boolean) => void) | null = null
 
+  /** When false, ignore all pointer input (e.g. while the light editor is active). */
+  interactionEnabled = true
+
   constructor (deps: FurnitureDeps) {
     this.scene    = deps.scene
     this.camera   = deps.camera
@@ -295,7 +298,7 @@ export class FurnitureManager {
   // #region Pointer handling
 
   private readonly onPointerDownCapture = (event: PointerEvent) => {
-    if (this.mode === 'placing')
+    if (this.mode === 'placing' || !this.interactionEnabled)
       return
 
     this.updatePointer(event.clientX, event.clientY)

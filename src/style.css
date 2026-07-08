@@ -598,3 +598,65 @@ body {
     }
   }
 }
+
+/* Floating spotlight editor card (shown while the light tool is active). */
+.light-panel {
+  position: absolute;
+  top: 72px;
+  right: var(--spacing-3xl);
+  width: min(300px, 88vw);
+  padding: var(--spacing-3xl);
+  background: var(--color-panel);
+  border: 1px solid var(--color-panel-border);
+  border-radius: var(--spacing-3xl);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(var(--spacing-lg));
+  z-index: 12;
+  display: none;
+
+  &.open {
+    display: block;
+    animation: pop-in 0.15s ease;
+  }
+}
+
+.light-panel-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: var(--spacing-xl);
+}
+
+.light-add {
+  width: 100%;
+  padding: var(--spacing-lg);
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-lg);
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--color-accent);
+    color: #06121f;
+  }
+}
+
+.light-params {
+  display: none;
+
+  &.visible {
+    display: block;
+  }
+}
+
+.color-input {
+  width: 44px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--color-panel-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  cursor: pointer;
+}

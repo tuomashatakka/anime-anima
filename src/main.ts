@@ -1,11 +1,11 @@
 import './style.css'
 import { VRMViewer } from './viewer'
 import { InteractionCoordinator } from './interaction'
-import { FurniturePanel, SettingsDialog, Toolbar } from './ui'
+import { FurniturePanel, LightPanel, SettingsDialog, Toolbar } from './ui'
 import { loadCatalog } from './manifest'
 import { loadString, saveString } from './storage'
 import type { AnimationEntry, ModelEntry } from './types'
-
+import * as s from '@tuomashatakka/threejs-scenes'
 
 const loadingEl = document.getElementById('loading')!
 let pending = 0
@@ -28,6 +28,9 @@ async function main () {
     },
     onLightingPick: preset => viewer.setLighting(preset),
   })
+
+  // Reflect the persisted lighting preset the viewer restored on construction.
+  toolbar.setActiveLighting(viewer.getLighting())
 
 
   new SettingsDialog({
@@ -69,6 +72,32 @@ async function main () {
     event.stopPropagation()
     wallTool.toggle()
   })
+
+  // Movable / aimable spotlights: a toggleable editor driving a TransformControls
+  // gizmo. While it's active the furniture manager goes dormant so the two
+  // pointer editors never fight over the same gesture.
+  const lights      = viewer.createLightManager()
+  const lightButton = document.getElementById('btn-lights') as HTMLButtonElement
+  const lightLabel  = document.getElementById('current-lights')!
+  const lightPanel  = new LightPanel({
+    onAdd:    () => lights.addSpotlight(),
+    onRemove: () => lights.removeSelected(),
+    onMode:   mode => lights.setMode(mode),
+    onChange: partial => lights.updateSelected(partial),
+  })
+  lights.onActiveChange = active => {
+    lightButton.setAttribute('aria-pressed', String(active))
+    lightLabel.textContent       = active ? 'On' : 'Off'
+    furniture.interactionEnabled = !active
+    lightPanel.setActive(active)
+  }
+  lights.onSelectionChange = record => lightPanel.setSelected(record)
+  lights.onModeChange      = mode => lightPanel.setMode(mode)
+  lightButton.addEventListener('click', event => {
+    event.stopPropagation()
+    lights.toggle()
+  })
+  lightPanel.setMode(lights.getMode())
 
   async function selectModel (entry: ModelEntry) {
     toolbar.setActiveModel(entry)
