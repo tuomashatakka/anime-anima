@@ -1,16 +1,14 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { Reflector } from 'three/examples/jsm/objects/Reflector.js'
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { FilmPass } from 'three/examples/jsm/postprocessing/FilmPass.js'
 import { LUTPass } from 'three/examples/jsm/postprocessing/LUTPass.js'
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { Lensflare, LensflareElement } from 'three/examples/jsm/objects/Lensflare.js'
-import { applyEnvironment } from '@tuomashatakka/threejs-scenes/lighting'
-import type { LightingConfig as LibLightingConfig } from '@tuomashatakka/threejs-scenes/lighting'
+import { applyEnvironment } from 'threejs-scenes/lib/raster'
+import type { LightingConfig as LibLightingConfig } from 'threejs-scenes/lib/raster'
+import { createComposer, createEmitter } from 'threejs-scenes/raster'
+import type { ComposerHandle, Emitter } from 'threejs-scenes/raster'
 import { makeFlareGhost, makeFlareMain, makeFlareRing, makeLightCone } from './lighting-helpers'
 import { CharacterController } from './character'
 import { FurnitureManager } from './furniture'
@@ -19,7 +17,6 @@ import { LightManager } from './lights'
 import { LightStore } from './light-store'
 import { WallTool } from './walls'
 import { createCinematicLUT } from './lut'
-import { AshParticles } from './ash'
 import { ColorGradeShader, DEFAULT_GRADE } from './grade'
 import type { ColorGrade } from './grade'
 import { loadString, saveString } from './storage'
@@ -168,6 +165,7 @@ export class VRMViewer {
   private readonly camera:   THREE.PerspectiveCamera
   private readonly controls: OrbitControls
   private readonly clock = new THREE.Clock()
+  private frame = 0
 
   private readonly character: CharacterController
 
@@ -180,10 +178,9 @@ export class VRMViewer {
   private beams!:          THREE.SpotLight[]
   private cones!:          THREE.Mesh[]
   private currentLighting: LightingPreset = 'dramatic'
-  private ash:             AshParticles | null = null
+  private ash:             Emitter | null = null
 
-  private composer:       EffectComposer | null = null
-  private bloomPass:      UnrealBloomPass | null = null
+  private composer:       ComposerHandle | null = null
   private godRaysPass:    ShaderPass | null = null
   private gradePass:      ShaderPass | null = null
   private readonly grade: ColorGrade = { ...DEFAULT_GRADE }
@@ -426,9 +423,28 @@ export class VRMViewer {
     grid.position.y                               = 0.004
     this.scene.add(grid)
 
-    // Ash drifting down, thick at the edges, clear in the middle.
-    this.ash = new AshParticles()
-    this.scene.add(this.ash.points)
+    // Ash drifting down a 16-unit column. Ported from a bespoke shader (which
+    // faded particles by world-space radial distance, keeping the centre clear
+    // and the rim dense) to the shared library's lifetime-based emitter, which
+    // has no equivalent for a world-space gradient — traded for age-based
+    // fade-in/out instead. Speed is negative (falling) with no gravity/damping
+    // decay, matching the original's constant per-particle fall speed.
+    this.ash = createEmitter({
+      capacity:   14000,
+      shape:      { kind: 'disc', radius: 16 },
+      speed:      [ -1.5, -0.4 ],
+      gravity:    [ 0, 0, 0 ],
+      damping:    1,
+      lifetime:   [ 16 / 1.5, 16 / 0.4 ],
+      color:      [[ 0, '#b9b2a6' ], [ 1, '#b9b2a6' ]],
+      alphaCurve: [[ 0, 0 ], [ 0.15, 0.7 ], [ 0.85, 0.7 ], [ 1, 0 ]],
+      size:       0.03,
+      blending:   'normal',
+      texture:    null,
+      seed:       1,
+    })
+    this.ash.object.position.y = 16
+    this.scene.add(this.ash.object)
   }
 
   // #endregion
@@ -517,16 +533,18 @@ export class VRMViewer {
   // #endregion
 
   private readonly tick = () => {
-    const delta = this.clock.getDelta()
+    const delta   = this.clock.getDelta()
+    const elapsed = this.clock.getElapsedTime()
+    this.frame++
 
     this.character.update(delta)
-    this.ash?.update(this.clock.getElapsedTime())
+    this.ash?.tick({ delta, elapsed, frame: this.frame })
     this.updateFollow()
     this.controls.update()
 
     if (this.postEnabled && this.composer) {
       this.updateGodRays()
-      this.composer.render()
+      this.composer.composer.render()
     }
     else
       this.renderer.render(this.scene, this.camera)
@@ -554,23 +572,21 @@ export class VRMViewer {
   }
 
   private buildComposer () {
-    // A non-multisampled HDR target: the Lensflare's occlusion read
-    // (copyFramebufferToTexture) is invalid against a multisampled framebuffer,
-    // which would spam GL_INVALID_OPERATION every frame once post is enabled.
-    const drawingSize  = this.renderer.getDrawingBufferSize(new THREE.Vector2())
-    const renderTarget = new THREE.WebGLRenderTarget(drawingSize.x, drawingSize.y, {
-      type:    THREE.HalfFloatType,
-      samples: 0,
+    const composer = createComposer({
+      renderer:       this.renderer,
+      scene:          this.scene,
+      camera:         this.camera,
+      width:          window.innerWidth,
+      height:         window.innerHeight,
+      // Never wired scene depth; none of film/LUT/grade/godRays consume it.
+      withDepth:      false,
+      // Gentle glow with a long, soft radius. Threshold kept fairly high so
+      // only genuine highlights bloom (a low threshold blew the lit model out).
+      withBloom:      true,
+      bloomStrength:  0.04,
+      bloomRadius:    1.15,
+      bloomThreshold: 0.92,
     })
-    const composer = new EffectComposer(this.renderer, renderTarget)
-    composer.addPass(new RenderPass(this.scene, this.camera))
-
-    // Bloom: gentle glow with a long, soft radius. Threshold kept fairly high so
-    // only genuine highlights bloom (a low threshold blew the lit model out).
-    const bloom = new UnrealBloomPass(
-      new THREE.Vector2(window.innerWidth, window.innerHeight), 0.04, 1.15, 0.92,
-    )
-    composer.addPass(bloom)
 
     // God rays — screen-space radial light scattering from the key light.
     const godRays                   = new ShaderPass(GodRaysShader)
@@ -578,25 +594,23 @@ export class VRMViewer {
     godRays.uniforms.decay.value    = 0.5
     godRays.uniforms.density.value  = 2.0
     godRays.uniforms.weight.value   = 0.5
-    // composer.addPass(godRays)
+    // composer.addPassBeforeOutput(godRays)
 
     // Strong, animated film grain.
     const film = new FilmPass(0.6, false)
-    composer.addPass(film)
+    composer.addPassBeforeOutput(film)
 
     // Cinematic colour grade (teal/orange split-tone, mild contrast + saturation).
-    const lut       = new LUTPass({ lut: createCinematicLUT(33), intensity: 0.49 })
-    composer.addPass(lut)
+    const lut = new LUTPass({ lut: createCinematicLUT(33), intensity: 0.49 })
+    composer.addPassBeforeOutput(lut)
 
     // User-adjustable brightness / contrast / gamma / saturation.
     const grade    = new ShaderPass(ColorGradeShader)
-    composer.addPass(grade)
+    composer.addPassBeforeOutput(grade)
     this.gradePass = grade
     this.applyGrade()
 
-    composer.addPass(new OutputPass())
     this.composer    = composer
-    this.bloomPass   = bloom
     this.godRaysPass = godRays
   }
 
@@ -701,9 +715,8 @@ export class VRMViewer {
 
     this.renderer.setPixelRatio(dpr)
     this.renderer.setSize(width, height)
-    this.composer?.setPixelRatio(dpr)
+    this.composer?.composer.setPixelRatio(dpr)
     this.composer?.setSize(width, height)
-    this.bloomPass?.setSize(width, height)
   }
 
   private updateFps (delta: number) {

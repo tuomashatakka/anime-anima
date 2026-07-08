@@ -5,7 +5,11 @@ import { FurniturePanel, LightPanel, SettingsDialog, Toolbar } from './ui'
 import { loadCatalog } from './manifest'
 import { loadString, saveString } from './storage'
 import type { AnimationEntry, ModelEntry } from './types'
-import * as s from '@tuomashatakka/threejs-scenes'
+import * as s from 'threejs-scenes'
+
+// @ts-expect-error debug
+window.__scenes = s
+
 
 const loadingEl = document.getElementById('loading')!
 let pending = 0
